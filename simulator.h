@@ -6,4 +6,6 @@
 
 #include "config_parser.h"
 
+#define DEBUG_SIMULATOR 1
+
 #endif
