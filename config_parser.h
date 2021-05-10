@@ -2,6 +2,7 @@
 #define __CENG_CONFIG_PARSER_H
 
 #include <stdio.h>
+#include <stdlib.h>
 
 typedef struct {
     int sender_id;
