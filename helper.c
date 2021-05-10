@@ -6,7 +6,7 @@ int range_decrease(int distance, int speed) {
 
 void travel(int distance, int speed) {
     long long time = distance * UNIT_TIME / speed;
-    wait(time);
+    _wait(time);
 }
 
 
@@ -23,7 +23,7 @@ int calculate_drone_charge(long long ms, int current_range, int max_range) {
     return total_range;
 }
 
-void wait(long long ms) {
+void _wait(long long ms) {
     long long time = ms * 1000;
     long long seconds = time/1000000;
     long long microseconds = time%1000000;
