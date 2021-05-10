@@ -2,6 +2,7 @@
 *.txt
 simulator
 test_dump/
+.vscode/
 
 # Prerequisites
 *.d
