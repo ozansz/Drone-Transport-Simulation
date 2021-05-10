@@ -32,6 +32,9 @@ pthread_mutex_t debug_printf_mutex = PTHREAD_MUTEX_INITIALIZER;
 #define DEBUG_MUTEX_RELEASE if (DEBUG_SIMULATOR) { pthread_mutex_unlock(&debug_printf_mutex); }
 
 void defer(void) {
+    if (DEBUG_SIMULATOR)
+        printf("[*] Called defer()\n");
+
     if (sim_config != NULL)
         free(sim_config);
 
@@ -70,6 +73,9 @@ void defer(void) {
 
     // TODO: Free "incoming_storages"
     // TODO: Free "outgoing_storages"
+
+    if (DEBUG_SIMULATOR)
+        printf("[*] defer(): Cleanup OK!\n");
 }
 
 void init_mutexes(int hub_count) {
@@ -132,15 +138,40 @@ void init_critical_structures(SimulationConfig* conf) {
         exit(1);
     }
 
+    incoming_storages = (PackageInfo***) malloc(sizeof(PackageInfo**) * conf->hubs_count);
+
+    if (incoming_storages == NULL) {
+        perror("malloc/incoming_storages");
+        exit(1);
+    }
+
+    outgoing_storages = (PackageInfo***) malloc(sizeof(PackageInfo**) * conf->hubs_count);
+
+    if (outgoing_storages == NULL) {
+        perror("malloc/outgoing_storages");
+        exit(1);
+    }
+
     for (int i = 0; i < conf->hubs_count; i++) {
         incoming_storage_remaining[i] = conf->hubs[i].incoming_storge_size;
         outgoing_storage_remaining[i] = conf->hubs[i].outgoing_storge_size;
         charging_spaces_remaining[i] = conf->hubs[i].charging_space_count;
         hub_activity_registry[i] = 1;
-    }
 
-    // TODO: Alloc "incoming_storages"
-    // TODO: Alloc "outgoing_storages"
+        incoming_storages[i] = (PackageInfo**) malloc(sizeof(PackageInfo*) * conf->hubs[i].incoming_storge_size);
+
+        if (incoming_storages[i] == NULL) {
+            perror("malloc/incoming_storages[i]");
+            exit(1);
+        }
+
+        outgoing_storages[i] = (PackageInfo**) malloc(sizeof(PackageInfo*) * conf->hubs[i].outgoing_storge_size);
+    
+        if (outgoing_storages[i] == NULL) {
+            perror("malloc/outgoing_storages[i]");
+            exit(1);
+        }
+    }
 }
 
 void sender_thread(void* sender_info, void *sim_config) {
@@ -173,14 +204,14 @@ void sender_thread(void* sender_info, void *sim_config) {
         int hub_id = -1;
 
         for (int i = 0; i < total_hubs_count; i++) 
-            if (hub_activity_registry[i])
+            if (hub_activity_registry[i]) {
                 if (hub_index == 0) {
                     hub_id = i + 1;
                     break;
                 } else {
                     hub_index--;
                 }
-
+            }
 
         if (hub_id == -1) {
             perror("unexpected: hub_id = -1");
