@@ -5,12 +5,14 @@
 #include <stdlib.h>
 
 typedef struct {
+    int hub_id;
     int sender_id;
     int total_packages;
     int wait_time_between_packages;
 } SenderConfig;
 
 typedef struct {
+    int hub_id;
     int receiver_id;
     int wait_time_between_packages;
 } ReceiverConfig;

@@ -48,6 +48,7 @@ SimulationConfig* parse_config_from_file(FILE* fp) {
         }
 
         config->hubs[hub_id-1].sender.sender_id = i + 1;
+        config->hubs[hub_id-1].sender.hub_id = hub_id;
         config->hubs[hub_id-1].sender.total_packages = packages;
         config->hubs[hub_id-1].sender.wait_time_between_packages = time_wait;
     }
@@ -63,6 +64,7 @@ SimulationConfig* parse_config_from_file(FILE* fp) {
             return NULL;
         }
 
+        config->hubs[hub_id-1].receiver.hub_id = hub_id;
         config->hubs[hub_id-1].receiver.receiver_id = i + 1;
         config->hubs[hub_id-1].receiver.wait_time_between_packages = time_wait;
     }
@@ -82,4 +84,38 @@ SimulationConfig* parse_config_from_file(FILE* fp) {
     }
 
     return config;
+}
+
+void dump_config(SimulationConfig* config) {
+    if (config == NULL) {
+        perror("dump_config/config is NULL");
+        return;
+    }
+
+    for (int i = 0; i < config->hubs_count; i++) {
+        printf("Hub-%d:\n", config->hubs[i].hub_id);
+        printf("    I: %d\n", config->hubs[i].incoming_storge_size);
+        printf("    O: %d\n", config->hubs[i].outgoing_storge_size);
+        printf("    C: %d\n", config->hubs[i].charging_space_count);
+
+        printf("    D: ");
+
+        for (int j = 0; j < config->hubs_count; j++)
+            printf("%d ", config->hubs[i].distance_to_other_hubs[j]);
+
+        printf("\n    S: Sender-%d\n", config->hubs[i].sender.sender_id);
+        printf("        S: %d\n", config->hubs[i].sender.wait_time_between_packages);
+        printf("        H: %d\n", config->hubs[i].sender.hub_id);
+        printf("        T: %d\n", config->hubs[i].sender.total_packages);
+        printf("    R: Receiver-%d\n", config->hubs[i].receiver.receiver_id);
+        printf("        S: %d\n", config->hubs[i].receiver.wait_time_between_packages);
+        printf("        H: %d\n\n", config->hubs[i].receiver.hub_id);
+    }
+
+    for (int i = 0; i < config->drones_count; i++) {
+        printf("Drone-%d:\n", config->drones[i].drone_id);
+        printf("    S: %d\n", config->drones[i].travel_speed);
+        printf("    H: %d\n", config->drones[i].starting_hub_id);
+        printf("    R: %d\n\n", config->drones[i].maximum_range);
+    }
 }
