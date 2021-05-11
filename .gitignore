@@ -3,6 +3,7 @@
 simulator
 test_dump/
 .vscode/
+pthtest/
 
 # Prerequisites
 *.d
