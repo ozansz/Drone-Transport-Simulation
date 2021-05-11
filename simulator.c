@@ -263,21 +263,22 @@ void sender_thread(void* sender_info, void *sim_config, void* self_conf) {
 
         // OLD TODO:
         // put package to self's hub's array on "outgoing_storages"
+        // TODO: Change this to pthread_cond_t
         while (1) {
-            pthread_mutex_lock(&hub_outgoing_storage_mutexes[hub_id-1]); // WaitCanDeposit
+            pthread_mutex_lock(&hub_outgoing_storage_mutexes[self->current_hub_id-1]); // WaitCanDeposit
             
-            if (outgoing_storage_remaining[hub_id-1] > 0) {
-                int new_package_index_in_store = simulation_config->hubs[hub_id-1].outgoing_storge_size - outgoing_storage_remaining[hub_id-1];
+            if (outgoing_storage_remaining[self->current_hub_id-1] > 0) {
+                int new_package_index_in_store = simulation_config->hubs[self->current_hub_id-1].outgoing_storge_size - outgoing_storage_remaining[hub_id-1];
                 
-                outgoing_storages[hub_id-1][new_package_index_in_store] = new_package; // SenderDeposit
-                outgoing_storage_remaining[hub_id-1] -= 1;
+                outgoing_storages[self->current_hub_id-1][new_package_index_in_store] = new_package; // SenderDeposit
+                outgoing_storage_remaining[self->current_hub_id-1] -= 1;
                 
-                pthread_mutex_unlock(&hub_outgoing_storage_mutexes[hub_id-1]);
+                pthread_mutex_unlock(&hub_outgoing_storage_mutexes[self->current_hub_id-1]);
                 
                 break;
             }
 
-            pthread_mutex_unlock(&hub_outgoing_storage_mutexes[hub_id-1]);
+            pthread_mutex_unlock(&hub_outgoing_storage_mutexes[self->current_hub_id-1]);
         }
 
         // FillPacketInfo && FillSenderInfo && WriteOutput
@@ -294,6 +295,51 @@ void sender_thread(void* sender_info, void *sim_config, void* self_conf) {
 
     FillSenderInfo(self, self->id, self->current_hub_id, self->remaining_package_count, NULL);
     DEBUG_LOG_SAFE(WriteOutput(self, NULL, NULL, NULL, SENDER_STOPPED))
+}
+
+void receiver_thread(void* receiver_info, void *sim_config, void* self_conf) {
+    ReceiverInfo* self = (ReceiverInfo*) receiver_info;
+    ReceiverConfig* self_config = (ReceiverConfig*) self_conf;
+    SimulationConfig* simulation_config = (SimulationConfig*) sim_config;
+
+    DEBUG_LOG_SAFE(printf("Receiver Thread awake (id: %d, hub: %d)\n", self->id, self->current_hub_id))
+    DEBUG_LOG_SAFE(WriteOutput(NULL, self, NULL, NULL, RECEIVER_CREATED))
+
+    while (1) {
+        pthread_mutex_lock(&hub_info_mutex); // while CurrentHub is active do
+
+        if (!hub_activity_registry[self->current_hub_id-1]) {
+            pthread_mutex_unlock(&hub_info_mutex);
+            break;
+        }
+
+        pthread_mutex_unlock(&hub_info_mutex);
+        
+        pthread_mutex_lock(&hub_incoming_storage_mutexes[self->current_hub_id-1]);
+
+        for (int package_index = 0; package_index < simulation_config->hubs[self->current_hub_id-1].incoming_storge_size; package_index++)
+            if (incoming_storages[self->current_hub_id-1][package_index] != NULL)
+                if (incoming_storages[self->current_hub_id-1][package_index]->receiver_id == self->id) {
+                    PackageInfo* incoming_package = incoming_storages[self->current_hub_id-1][package_index];
+                    incoming_storages[self->current_hub_id-1][package_index] = NULL;
+
+                    FillPacketInfo(incoming_package, incoming_package->sender_id, incoming_package->sending_hub_id, incoming_package->receiver_id, self->current_hub_id);
+                    FillReceiverInfo(self, self->id, self->current_hub_id, incoming_package);
+                    DEBUG_LOG_SAFE(WriteOutput(NULL, self, NULL, NULL, RECEIVER_PICKUP))
+
+                    // TODO: Do this
+                    // BUT: Be careful for double-freeing
+                    // free(incoming_storages[self->current_hub_id-1][package_index])
+
+                    // TODO: Change this to: wait()
+                    _wait(self_config->wait_time_between_packages);
+                }
+
+        pthread_mutex_unlock(&hub_incoming_storage_mutexes[self->current_hub_id-1]);
+    }
+
+    FillReceiverInfo(self, self->id, self->current_hub_id, NULL);
+    DEBUG_LOG_SAFE(WriteOutput(NULL, self, NULL, NULL, RECEIVER_STOPPED))
 }
 
 int main(int argc, char **argv, char **envp) {
