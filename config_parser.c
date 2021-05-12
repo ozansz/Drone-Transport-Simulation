@@ -33,6 +33,28 @@ SimulationConfig* parse_config_from_file(FILE* fp) {
                 fscanf(fp, "%d\n", &config->hubs[i].distance_to_other_hubs[j]);
             else
                 fscanf(fp, "%d ", &config->hubs[i].distance_to_other_hubs[j]);
+
+        config->hubs[i].nearest_other_hubs_sorted = (int*) malloc(sizeof(int) * (config->hubs_count - 1));
+
+        for (int h = 0, hh = 0; h < config->hubs_count; h++)
+            if (h != i)
+                config->hubs[i].nearest_other_hubs_sorted[hh++] = h + 1;
+
+        for (int outer_i = 0; outer_i < config->hubs_count - 1; outer_i++) {
+            int made_change = 0;
+
+            for (int h = 0; h < config->hubs_count - 2; h++)
+                if (config->hubs[i].distance_to_other_hubs[config->hubs[i].nearest_other_hubs_sorted[h]-1] < config->hubs[i].distance_to_other_hubs[config->hubs[i].nearest_other_hubs_sorted[h+1]-1]) {
+                    int tmp = config->hubs[i].nearest_other_hubs_sorted[h+1];
+                    config->hubs[i].nearest_other_hubs_sorted[h+1] = config->hubs[i].nearest_other_hubs_sorted[h];
+                    config->hubs[i].nearest_other_hubs_sorted[h] = tmp;
+
+                    made_change = 1;
+                }
+
+            if (!made_change)
+                break;
+        }
     }
 
     for (int i = 0; i < config->hubs_count; i++) {
@@ -102,6 +124,11 @@ void dump_config(SimulationConfig* config) {
 
         for (int j = 0; j < config->hubs_count; j++)
             printf("%d ", config->hubs[i].distance_to_other_hubs[j]);
+
+        printf("\n    Nearest: ");
+
+        for (int j = 0; j < config->hubs_count - 1; j++)
+            printf("%d ", config->hubs[i].nearest_other_hubs_sorted[j]);
 
         printf("\n    S: Sender-%d\n", config->hubs[i].sender.sender_id);
         printf("        S: %d\n", config->hubs[i].sender.wait_time_between_packages);

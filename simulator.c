@@ -57,44 +57,111 @@ void defer(void) {
     if (DEBUG_SIMULATOR)
         printf("[*] Called defer()\n");
 
-    if (sim_config != NULL)
+    if (sim_config != NULL) {
+        if (DEBUG_SIMULATOR)
+            printf(" ++ Freeing sim_config\n");
+
+        if (sim_config->drones != NULL)
+            free(sim_config->drones);
+
+        if (sim_config->hubs != NULL) {
+            for (int i = 0; i < sim_config->hubs_count; i++) {
+                if (sim_config->hubs[i].distance_to_other_hubs != NULL)
+                    free(sim_config->hubs[i].distance_to_other_hubs);
+
+                if (sim_config->hubs[i].nearest_other_hubs_sorted != NULL)
+                    free(sim_config->hubs[i].nearest_other_hubs_sorted);
+            }
+
+            free(sim_config->hubs);
+        }
+
         free(sim_config);
+    }
 
-    if (hub_threads != NULL)
+    if (hub_threads != NULL) {
+        if (DEBUG_SIMULATOR)
+            printf(" ++ Freeing hub_threads\n");
+        
         free(hub_threads);
+    }
 
-    if (drone_threads != NULL)
+    if (drone_threads != NULL) {
+        if (DEBUG_SIMULATOR)
+            printf(" ++ Freeing drone_threads\n");
+        
         free(drone_threads);
+    }
 
-    if (sender_threads != NULL)
+    if (sender_threads != NULL) {
+        if (DEBUG_SIMULATOR)
+            printf(" ++ Freeing sender_threads\n");
+
         free(sender_threads);
+    }
 
-    if (receiver_threads != NULL)
+    if (receiver_threads != NULL) {
+        if (DEBUG_SIMULATOR)
+            printf(" ++ Freeing receiver_threads\n");
+
         free(receiver_threads);
+    }
 
-    if (hub_incoming_storage_mutexes != NULL)
+    if (hub_incoming_storage_mutexes != NULL) {
+        if (DEBUG_SIMULATOR)
+            printf(" ++ Freeing hub_incoming_storage_mutexes\n");
+
         free(hub_incoming_storage_mutexes);
+    }
 
-    if (hub_outgoing_storage_mutexes != NULL)
+    if (hub_outgoing_storage_mutexes != NULL) {
+        if (DEBUG_SIMULATOR)
+            printf(" ++ Freeing hub_outgoing_storage_mutexes\n");
+
         free(hub_outgoing_storage_mutexes);
+    }
 
-    if (hub_charging_spaces_mutexes != NULL)
+    if (hub_charging_spaces_mutexes != NULL) {
+        if (DEBUG_SIMULATOR)
+            printf(" ++ Freeing hub_charging_spaces_mutexes\n");
+
         free(hub_charging_spaces_mutexes);
+    }
 
-    if (incoming_storage_remaining != NULL)
+    if (incoming_storage_remaining != NULL) {
+        if (DEBUG_SIMULATOR)
+            printf(" ++ Freeing incoming_storage_remaining\n");
+
         free(incoming_storage_remaining);
+    }
 
-    if (outgoing_storage_remaining != NULL)
+    if (outgoing_storage_remaining != NULL) {
+        if (DEBUG_SIMULATOR)
+            printf(" ++ Freeing outgoing_storage_remaining\n");
+
         free(outgoing_storage_remaining);
+    }
 
-    if (charging_spaces_remaining != NULL)
+    if (charging_spaces_remaining != NULL) {
+        if (DEBUG_SIMULATOR)
+            printf(" ++ Freeing charging_spaces_remaining\n");
+
         free(charging_spaces_remaining);
+    }
     
-    if (hub_activity_registry != NULL)
-        free(hub_activity_registry);
+    if (hub_activity_registry != NULL) {
+        if (DEBUG_SIMULATOR)
+            printf(" ++ Freeing hub_activity_registry\n");
 
-    if (sender_activity_registry != NULL)
+        free(hub_activity_registry);
+    }
+
+    if (sender_activity_registry != NULL) {
+        if (DEBUG_SIMULATOR)
+            printf(" ++ Freeing sender_activity_registry\n");
+
         free(sender_activity_registry);
+    }
 
     // TODO: Free "incoming_storages"
     // TODO: Free "outgoing_storages"
