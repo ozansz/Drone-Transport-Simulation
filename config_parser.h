@@ -23,6 +23,7 @@ typedef struct {
     int outgoing_storge_size;
     int charging_space_count;
     int* distance_to_other_hubs;
+    int* nearest_other_hubs_sorted;
     SenderConfig sender;
     ReceiverConfig receiver;
 } HubConfig;
