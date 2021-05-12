@@ -55,7 +55,81 @@ pthread_mutex_t debug_printf_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 void defer(void) {
     if (DEBUG_SIMULATOR)
-        printf("[*] Called defer()\n");
+        printf("\n[*] Called defer()\n");
+
+    if (incoming_storages != NULL) {
+        if (DEBUG_SIMULATOR)
+            printf(" ++ Freeing incoming_storages\n");
+
+        if ((sim_config != NULL) && (sim_config->hubs != NULL)) {
+            for (int i = 0; i < sim_config->hubs_count; i++) {
+                if (incoming_storages[i] != NULL) {
+                    if (DEBUG_SIMULATOR)
+                        printf("    ++ incoming_storages[%d]\n", i);
+
+                    for (int j = 0; j < sim_config->hubs[i].incoming_storge_size; j++)
+                        if (incoming_storages[i][j] != NULL)
+                            free(incoming_storages[i][j]);
+
+                    free(incoming_storages[i]);
+                }
+            }
+        } else {
+            printf("   >!! sim_config is NULL, just freeing incoming_storages.\n");
+            printf("   >!! There may be data loss in heap.\n");
+        }
+
+        free(incoming_storages);
+    }
+
+    if (outgoing_storages != NULL) {
+        if (DEBUG_SIMULATOR)
+            printf(" ++ Freeing outgoing_storages\n");
+
+        if ((sim_config != NULL) && (sim_config->hubs != NULL)) {
+            for (int i = 0; i < sim_config->hubs_count; i++) {
+                if (outgoing_storages[i] != NULL) {
+                    if (DEBUG_SIMULATOR)
+                        printf("    ++ outgoing_storages[%d]\n", i);
+
+                    for (int j = 0; j < sim_config->hubs[i].outgoing_storge_size; j++)
+                        if (outgoing_storages[i][j] != NULL)
+                            free(outgoing_storages[i][j]);
+
+                    free(outgoing_storages[i]);
+                }
+            }
+        } else {
+            printf("   >!! sim_config is NULL, just freeing outgoing_storages.\n");
+            printf("   >!! There may be data loss in heap.\n");
+        }
+
+        free(outgoing_storages);
+    }
+
+    if (drone_info_registry != NULL) {
+        if (DEBUG_SIMULATOR)
+            printf(" ++ Freeing drone_info_registry\n");
+
+        if ((sim_config != NULL) && (sim_config->drones != NULL)) {
+            for (int i = 0; i < sim_config->drones_count; i++) {
+                if (drone_info_registry[i] != NULL) {
+                    if (DEBUG_SIMULATOR)
+                        printf("    ++ drone_info_registry[%d]\n", i);
+
+                    if (drone_info_registry[i]->info != NULL)
+                        free(drone_info_registry[i]->info);
+
+                    free(drone_info_registry[i]);
+                }
+            }
+        } else {
+            printf("   >!! sim_config is NULL, just freeing drone_info_registry.\n");
+            printf("   >!! There may be data loss in heap.\n");
+        }
+
+        free(drone_info_registry);
+    }
 
     if (sim_config != NULL) {
         if (DEBUG_SIMULATOR)
@@ -163,10 +237,6 @@ void defer(void) {
         free(sender_activity_registry);
     }
 
-    // TODO: Free "incoming_storages"
-    // TODO: Free "outgoing_storages"
-    // TODO: Free "drone_info_registry"
-
     if (DEBUG_SIMULATOR)
         printf("[*] defer(): Cleanup OK!\n");
 }
@@ -203,12 +273,18 @@ void init_mutexes(int hub_count) {
 void init_critical_structures(SimulationConfig* conf) {
     total_hubs_count = conf->hubs_count;
 
+    if (DEBUG_SIMULATOR)
+        printf("[*] Allocating incoming_storage_remaining\n");
+
     incoming_storage_remaining = (int*) malloc(sizeof(int) * conf->hubs_count);
     
     if (incoming_storage_remaining == NULL) {
         perror("malloc/incoming_storage_remaining");
         exit(1);
     }
+
+    if (DEBUG_SIMULATOR)
+        printf("[*] Allocating outgoing_storage_remaining\n");
     
     outgoing_storage_remaining = (int*) malloc(sizeof(int) * conf->hubs_count);
     
@@ -216,6 +292,9 @@ void init_critical_structures(SimulationConfig* conf) {
         perror("malloc/outgoing_storage_remaining");
         exit(1);
     }
+
+    if (DEBUG_SIMULATOR)
+        printf("[*] Allocating charging_spaces_remaining\n");
     
     charging_spaces_remaining = (int*) malloc(sizeof(int) * conf->hubs_count);
 
@@ -224,12 +303,18 @@ void init_critical_structures(SimulationConfig* conf) {
         exit(1);
     }
 
+    if (DEBUG_SIMULATOR)
+        printf("[*] Allocating hub_activity_registry\n");
+
     hub_activity_registry = (int*) malloc(sizeof(int) * conf->hubs_count);
 
     if (hub_activity_registry == NULL) {
         perror("malloc/hub_activity_registry");
         exit(1);
     }
+
+    if (DEBUG_SIMULATOR)
+        printf("[*] Allocating sender_activity_registry\n");
 
     sender_activity_registry = (int*) malloc(sizeof(int) * conf->hubs_count);
 
@@ -238,12 +323,18 @@ void init_critical_structures(SimulationConfig* conf) {
         exit(1);
     }
 
+    if (DEBUG_SIMULATOR)
+        printf("[*] Allocating incoming_storages\n");
+
     incoming_storages = (PackageInfo***) malloc(sizeof(PackageInfo**) * conf->hubs_count);
 
     if (incoming_storages == NULL) {
         perror("malloc/incoming_storages");
         exit(1);
     }
+
+    if (DEBUG_SIMULATOR)
+        printf("[*] Allocating outgoing_storages\n");
 
     outgoing_storages = (PackageInfo***) malloc(sizeof(PackageInfo**) * conf->hubs_count);
 
@@ -259,6 +350,9 @@ void init_critical_structures(SimulationConfig* conf) {
         hub_activity_registry[i] = 1;
         sender_activity_registry[i] = 1;
 
+        if (DEBUG_SIMULATOR)
+            printf("[*] Allocating incoming_storages[%d]\n", i);
+
         incoming_storages[i] = (PackageInfo**) malloc(sizeof(PackageInfo*) * conf->hubs[i].incoming_storge_size);
 
         if (incoming_storages[i] == NULL) {
@@ -266,8 +360,14 @@ void init_critical_structures(SimulationConfig* conf) {
             exit(1);
         }
 
+        if (DEBUG_SIMULATOR)
+            printf("[*] Initializing incoming_storages[%d][<size:%d>]\n", i, conf->hubs[i].incoming_storge_size);
+
         for (int j = 0; j < conf->hubs[i].incoming_storge_size; j++)
             incoming_storages[i][j] = NULL;
+
+        if (DEBUG_SIMULATOR)
+            printf("[*] Allocating outgoing_storages[%d]\n", i);
 
         outgoing_storages[i] = (PackageInfo**) malloc(sizeof(PackageInfo*) * conf->hubs[i].outgoing_storge_size);
     
@@ -276,9 +376,15 @@ void init_critical_structures(SimulationConfig* conf) {
             exit(1);
         }
 
+        if (DEBUG_SIMULATOR)
+            printf("[*] Initializing outgoing_storages[%d][<size:%d>]\n", i, conf->hubs[i].outgoing_storge_size);
+
         for (int j = 0; j < conf->hubs[i].outgoing_storge_size; j++)
             outgoing_storages[i][j] = NULL;
     }
+
+    if (DEBUG_SIMULATOR)
+        printf("[*] Allocating drone_info_registry\n");
 
     drone_info_registry = (DynamicDroneInfo**) malloc(sizeof(DynamicDroneInfo*) * conf->drones_count);
 
@@ -288,6 +394,9 @@ void init_critical_structures(SimulationConfig* conf) {
     }
 
     for (int i = 0; i < conf->drones_count; i++) {
+        if (DEBUG_SIMULATOR)
+            printf("[*] Allocating drone_info_registry[%d]\n", i);
+
         drone_info_registry[i] = (DynamicDroneInfo*) malloc(sizeof(DynamicDroneInfo));
 
         if (drone_info_registry[i] == NULL) {
@@ -295,13 +404,20 @@ void init_critical_structures(SimulationConfig* conf) {
             exit(1);
         }
 
+        if (DEBUG_SIMULATOR)
+            printf("[*] Initializing drone_info_registry[%d]\n", i);
+
         // TODO: Check this.
         drone_info_registry[i]->hub_id = conf->drones[i].starting_hub_id;
-        drone_info_registry[i]->info->current_hub_id = conf->drones[i].starting_hub_id;
-        drone_info_registry[i]->info->current_range = conf->drones[i].maximum_range;
-        drone_info_registry[i]->info->id = conf->drones[i].drone_id;
-        drone_info_registry[i]->info->next_hub_id = -1;
-        drone_info_registry[i]->info->packageInfo = NULL;
+        
+        // IMPORTANT: drone_info_registry[i]->info will be allocated and set inside "main" function.
+        // drone_info_registry[i]->info->current_hub_id = conf->drones[i].starting_hub_id;
+        // drone_info_registry[i]->info->current_range = conf->drones[i].maximum_range;
+        // drone_info_registry[i]->info->id = conf->drones[i].drone_id;
+        // drone_info_registry[i]->info->next_hub_id = -1;
+        // drone_info_registry[i]->info->packageInfo = NULL;
+        drone_info_registry[i]->info = NULL;
+
         drone_info_registry[i]->stat = DRONE_IN_HUB;
     }
 
