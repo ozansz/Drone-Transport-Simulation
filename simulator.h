@@ -19,4 +19,22 @@ typedef struct {
     SimulationConfig* simulation_config;
 } SenderThreadConfig;
 
+typedef struct {
+    ReceiverInfo* self;
+    ReceiverConfig* self_config;
+    SimulationConfig* simulation_config;
+} ReceiverThreadConfig;
+
+typedef struct {
+    HubInfo* self;
+    HubConfig* self_config;
+    SimulationConfig* simulation_config;
+} HubThreadConfig;
+
+typedef struct {
+    DroneInfo* self;
+    DroneConfig* self_config;
+    SimulationConfig* simulation_config;
+} DroneThreadConfig;
+
 #endif

@@ -552,10 +552,11 @@ void* sender_thread(void* _sender_thread_config) {
     return NULL;
 }
 
-void receiver_thread(void* receiver_info, void *sim_config, void* self_conf) {
-    ReceiverInfo* self = (ReceiverInfo*) receiver_info;
-    ReceiverConfig* self_config = (ReceiverConfig*) self_conf;
-    SimulationConfig* simulation_config = (SimulationConfig*) sim_config;
+void receiver_thread(void* _receiver_thread_config) {
+    ReceiverThreadConfig* receiver_thread_config = (ReceiverThreadConfig*) _receiver_thread_config;
+    ReceiverInfo* self = (ReceiverInfo*) receiver_thread_config->self;
+    ReceiverConfig* self_config = (ReceiverConfig*) receiver_thread_config->self_config;
+    SimulationConfig* simulation_config = (SimulationConfig*) receiver_thread_config->simulation_config;
 
     DEBUG_LOG_SAFE(printf("Receiver Thread awake (id: %d, hub: %d)\n", self->id, self->current_hub_id))
     LOG_SAFE(WriteOutput(NULL, self, NULL, NULL, RECEIVER_CREATED))
@@ -595,12 +596,15 @@ void receiver_thread(void* receiver_info, void *sim_config, void* self_conf) {
 
     FillReceiverInfo(self, self->id, self->current_hub_id, NULL);
     LOG_SAFE(WriteOutput(NULL, self, NULL, NULL, RECEIVER_STOPPED))
+
+    return NULL;
 }
 
-void hub_thread(void* hub_info, void *sim_config, void* self_conf) {
-    HubInfo* self = (HubInfo*) hub_info;
-    HubConfig* self_config = (HubConfig*) self_conf;
-    SimulationConfig* simulation_config = (SimulationConfig*) sim_config;
+void hub_thread(void* _hub_thread_config) {
+    HubThreadConfig* hub_thread_config = (HubThreadConfig*) _hub_thread_config;
+    HubInfo* self = (HubInfo*) hub_thread_config->self;
+    HubConfig* self_config = (HubConfig*) hub_thread_config->self_config;
+    SimulationConfig* simulation_config = (SimulationConfig*) hub_thread_config->simulation_config;
 
     DEBUG_LOG_SAFE(printf("Hub Thread awake (id: %d)\n", self->id))
     LOG_SAFE(WriteOutput(NULL, NULL, NULL, self, HUB_CREATED))
@@ -756,6 +760,22 @@ select_drones_loop:
 
     FillHubInfo(self, self->id);
     LOG_SAFE(WriteOutput(NULL, NULL, NULL, self, HUB_STOPPED))
+
+    return NULL;
+}
+
+void drone_thread(void* _drone_thread_config) {
+    DroneThreadConfig* drone_thread_config = (DroneThreadConfig*) _drone_thread_config;
+    DroneInfo* self = (DroneInfo*) drone_thread_config->self;
+    DroneConfig* self_config = (DroneConfig*) drone_thread_config->self_config;
+    SimulationConfig* simulation_config = (SimulationConfig*) drone_thread_config->simulation_config;
+
+    DEBUG_LOG_SAFE(printf("Drone Thread awake (id: %d, on hub: %d)\n", self->id, self->current_hub_id))
+    LOG_SAFE(WriteOutput(NULL, NULL, self, NULL, DRONE_CREATED))
+
+    // TODO: Implement me :)
+
+    return NULL;
 }
 
 int main(int argc, char **argv, char **envp) {
