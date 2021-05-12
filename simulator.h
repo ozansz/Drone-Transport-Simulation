@@ -13,4 +13,10 @@
 
 #define DEBUG_SIMULATOR 1
 
+typedef struct {
+    SenderInfo* self;
+    SenderConfig* self_config;
+    SimulationConfig* simulation_config;
+} SenderThreadConfig;
+
 #endif

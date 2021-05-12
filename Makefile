@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -O3 -Wno-unused-result# -static# -g #-lpthread# with static linking for better debug @ valgrin
+CFLAGS = -Wall -O3 -Wno-unused-result -static -g -pthread # with static linking for better debug @ valgrin
 
 all: simulator
 

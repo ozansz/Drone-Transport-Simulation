@@ -8,7 +8,7 @@ pthread_t* drone_threads = NULL;
 pthread_t* sender_threads = NULL;
 pthread_t* receiver_threads = NULL;
 
-pthread_mutex_t hub_info_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t hub_info_mutex;
 int total_hubs_count;
 int* hub_activity_registry = NULL; // int used as bo0l
 
@@ -25,12 +25,12 @@ typedef struct {
     DroneInfo* info;
 } DynamicDroneInfo;
 
-pthread_mutex_t drone_info_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t drone_info_mutex;
 DynamicDroneInfo** drone_info_registry = NULL;
 
-pthread_mutex_t receiver_info_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t receiver_info_mutex;
 
-pthread_mutex_t sender_info_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t sender_info_mutex;
 int* sender_activity_registry = NULL; // int used as bo0l
 
 pthread_mutex_t* hub_incoming_storage_mutexes = NULL;
@@ -46,12 +46,17 @@ PackageInfo*** outgoing_storages = NULL;
 int* charging_spaces_remaining = NULL; // hub look at (charging_spaces_remaining < self.charging_capacity)
 
 // IMPORTANT NOTE: We need to lock this mutex before using WriteOutput() !!!
-pthread_mutex_t debug_printf_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t debug_printf_mutex;
 
-#define DEBUG_MUTEX_LOCK if (DEBUG_SIMULATOR) { pthread_mutex_lock(&debug_printf_mutex); }
-#define DEBUG_MUTEX_RELEASE if (DEBUG_SIMULATOR) { pthread_mutex_unlock(&debug_printf_mutex); }
-#define LOG_SAFE(x) if (DEBUG_SIMULATOR) { pthread_mutex_lock(&debug_printf_mutex); x; pthread_mutex_unlock(&debug_printf_mutex); } else { x; }
-#define DEBUG_LOG_SAFE(x) if (DEBUG_SIMULATOR) { pthread_mutex_lock(&debug_printf_mutex); x; pthread_mutex_unlock(&debug_printf_mutex); }
+int __pth_lock_rv, __pth_unlock_rv;
+
+#define DEBUG_MUTEX_LOCK if (DEBUG_SIMULATOR) { if (pthread_mutex_lock(&debug_printf_mutex) != 0) { perror("pthread_mutex_lock: in DEBUG_MUTEX_LOCK"); } }
+#define DEBUG_MUTEX_RELEASE if (DEBUG_SIMULATOR) { if (pthread_mutex_unlock(&debug_printf_mutex) != 0) { perror("pthread_mutex_unlock: in DEBUG_MUTEX_RELEASE"); } }
+#define LOG_SAFE(x) if (DEBUG_SIMULATOR) { if (pthread_mutex_lock(&debug_printf_mutex) != 0) { perror("pthread_mutex_lock: in LOG_SAFE"); } x; if (pthread_mutex_unlock(&debug_printf_mutex) != 0) { perror("pthread_mutex_unlock: in LOG_SAFE"); } } else { x; }
+#define DEBUG_LOG_SAFE(x) if (DEBUG_SIMULATOR) { if (pthread_mutex_lock(&debug_printf_mutex) != 0) { perror("pthread_mutex_lock: in DEBUG_LOG_SAFE"); } x; if (pthread_mutex_unlock(&debug_printf_mutex) != 0) { perror("pthread_mutex_unlock: in DEBUG_LOG_SAFE"); } }
+
+#define LOCK_AND_CHECK(x) { if ((__pth_lock_rv = pthread_mutex_lock(&x)) != 0) { fprintf(stderr, "pthread_mutex_lock: in LOCK_AND_CHECK(" #x "): %d", __pth_lock_rv); } }
+#define UNLOCK_AND_CHECK(x) { if ((__pth_unlock_rv = pthread_mutex_unlock(&x)) != 0) { fprintf(stderr, "pthread_mutex_unlock: in UNLOCK_AND_CHECK(" #x "): %d", __pth_unlock_rv); } }
 
 void defer(void) {
     if (DEBUG_SIMULATOR)
@@ -263,10 +268,21 @@ void init_mutexes(int hub_count) {
         exit(1);
     }
 
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init (&attr);
+    // pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_ERRORCHECK_NP);
+    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE_NP);
+
+    pthread_mutex_init(&hub_info_mutex, &attr);
+    pthread_mutex_init(&drone_info_mutex, &attr);
+    pthread_mutex_init(&receiver_info_mutex, &attr);
+    pthread_mutex_init(&sender_info_mutex, &attr);
+    pthread_mutex_init(&debug_printf_mutex, &attr);
+
     for (int i = 0; i < hub_count; i++) {
-        pthread_mutex_init(&hub_incoming_storage_mutexes[i], NULL);
-        pthread_mutex_init(&hub_outgoing_storage_mutexes[i], NULL);
-        pthread_mutex_init(&hub_charging_spaces_mutexes[i], NULL);
+        pthread_mutex_init(&hub_incoming_storage_mutexes[i], &attr);
+        pthread_mutex_init(&hub_outgoing_storage_mutexes[i], &attr);
+        pthread_mutex_init(&hub_charging_spaces_mutexes[i], &attr);
     }
 }
 
@@ -423,11 +439,12 @@ void init_critical_structures(SimulationConfig* conf) {
 
 }
 
-void sender_thread(void* sender_info, void *sim_config, void* self_conf) {
+void* sender_thread(void* _sender_thread_config) {
+    SenderThreadConfig* sender_thread_config = (SenderThreadConfig*) _sender_thread_config;
     PackageInfo* new_package = NULL;
-    SenderInfo* self = (SenderInfo*) sender_info;
-    SenderConfig* self_config = (SenderConfig*) self_conf;
-    SimulationConfig* simulation_config = (SimulationConfig*) sim_config;
+    SenderInfo* self = (SenderInfo*) sender_thread_config->self;
+    SenderConfig* self_config = (SenderConfig*) sender_thread_config->self_config;
+    SimulationConfig* simulation_config = (SimulationConfig*) sender_thread_config->simulation_config;
 
     DEBUG_LOG_SAFE(printf("Sender Thread awake (id: %d, hub: %d, packages: %d)\n", self->id, self->current_hub_id, self->remaining_package_count))
 
@@ -445,13 +462,13 @@ void sender_thread(void* sender_info, void *sim_config, void* self_conf) {
 
     for (int _packet_index = 0; self->remaining_package_count > 0; _packet_index++, self->remaining_package_count--) {
         int active_hubs_count = 0;
-        pthread_mutex_lock(&hub_info_mutex);
+        LOCK_AND_CHECK(hub_info_mutex)
 
         for (int i = 0; i < total_hubs_count; i++)
             if (hub_activity_registry[i])
                 active_hubs_count++;
 
-        pthread_mutex_unlock(&hub_info_mutex);
+        UNLOCK_AND_CHECK(hub_info_mutex)
 
         srand(time(NULL));
         
@@ -476,9 +493,11 @@ void sender_thread(void* sender_info, void *sim_config, void* self_conf) {
         int receiver_id = simulation_config->hubs[hub_id-1].receiver.receiver_id;
 
         DEBUG_LOG_SAFE(printf("Sender Thread %d: Selected Hub-%d:Rec-%d for package #%d\n", self->id, hub_id, receiver_id, _packet_index))
-        
-        if (new_package != NULL)
-            free(new_package);
+
+        // CRITICAL ERROR: This will be done bty the receiver or defer()!!!
+        //                  !!! DO NOT DO THIS AGAIN !!!        
+        // if (new_package != NULL)
+        //     free(new_package);
 
         new_package = (PackageInfo*) malloc(sizeof(PackageInfo));
 
@@ -493,21 +512,24 @@ void sender_thread(void* sender_info, void *sim_config, void* self_conf) {
         // OLD TODO:
         // put package to self's hub's array on "outgoing_storages"
         // TODO: Change this to pthread_cond_t
+
+        DEBUG_LOG_SAFE(printf("Sender Thread %d: Will put package #%d to my hub (%d)'s outgoing facility\n", self->id, _packet_index, self->current_hub_id))
+
         while (1) {
-            pthread_mutex_lock(&hub_outgoing_storage_mutexes[self->current_hub_id-1]); // WaitCanDeposit
+            LOCK_AND_CHECK(hub_outgoing_storage_mutexes[self->current_hub_id-1]); // WaitCanDeposit
             
             if (outgoing_storage_remaining[self->current_hub_id-1] > 0) {
-                int new_package_index_in_store = simulation_config->hubs[self->current_hub_id-1].outgoing_storge_size - outgoing_storage_remaining[hub_id-1];
+                int new_package_index_in_store = simulation_config->hubs[self->current_hub_id-1].outgoing_storge_size - outgoing_storage_remaining[self->current_hub_id-1];
                 
                 outgoing_storages[self->current_hub_id-1][new_package_index_in_store] = new_package; // SenderDeposit
                 outgoing_storage_remaining[self->current_hub_id-1] -= 1;
                 
-                pthread_mutex_unlock(&hub_outgoing_storage_mutexes[self->current_hub_id-1]);
+                UNLOCK_AND_CHECK(hub_outgoing_storage_mutexes[self->current_hub_id-1]);
                 
                 break;
             }
 
-            pthread_mutex_unlock(&hub_outgoing_storage_mutexes[self->current_hub_id-1]);
+            UNLOCK_AND_CHECK(hub_outgoing_storage_mutexes[self->current_hub_id-1]);
         }
 
         // FillPacketInfo && FillSenderInfo && WriteOutput
@@ -518,12 +540,16 @@ void sender_thread(void* sender_info, void *sim_config, void* self_conf) {
         _wait(self_config->wait_time_between_packages);
     }
 
-    pthread_mutex_lock(&sender_info_mutex);
+    LOCK_AND_CHECK(sender_info_mutex);
     sender_activity_registry[self->id-1] = 0;
-    pthread_mutex_unlock(&sender_info_mutex);
+    UNLOCK_AND_CHECK(sender_info_mutex);
 
     FillSenderInfo(self, self->id, self->current_hub_id, self->remaining_package_count, NULL);
     LOG_SAFE(WriteOutput(self, NULL, NULL, NULL, SENDER_STOPPED))
+
+    DEBUG_LOG_SAFE(printf("Sender Thread %d: Exiting...\n", self->id))
+
+    return NULL;
 }
 
 void receiver_thread(void* receiver_info, void *sim_config, void* self_conf) {
@@ -535,16 +561,16 @@ void receiver_thread(void* receiver_info, void *sim_config, void* self_conf) {
     LOG_SAFE(WriteOutput(NULL, self, NULL, NULL, RECEIVER_CREATED))
 
     while (1) {
-        pthread_mutex_lock(&hub_info_mutex); // while CurrentHub is active do
+        LOCK_AND_CHECK(hub_info_mutex); // while CurrentHub is active do
 
         if (!hub_activity_registry[self->current_hub_id-1]) {
-            pthread_mutex_unlock(&hub_info_mutex);
+            UNLOCK_AND_CHECK(hub_info_mutex);
             break;
         }
 
-        pthread_mutex_unlock(&hub_info_mutex);
+        UNLOCK_AND_CHECK(hub_info_mutex);
         
-        pthread_mutex_lock(&hub_incoming_storage_mutexes[self->current_hub_id-1]);
+        LOCK_AND_CHECK(hub_incoming_storage_mutexes[self->current_hub_id-1]);
 
         for (int package_index = 0; package_index < simulation_config->hubs[self->current_hub_id-1].incoming_storge_size; package_index++)
             if (incoming_storages[self->current_hub_id-1][package_index] != NULL)
@@ -564,7 +590,7 @@ void receiver_thread(void* receiver_info, void *sim_config, void* self_conf) {
                     _wait(self_config->wait_time_between_packages);
                 }
 
-        pthread_mutex_unlock(&hub_incoming_storage_mutexes[self->current_hub_id-1]);
+        UNLOCK_AND_CHECK(hub_incoming_storage_mutexes[self->current_hub_id-1]);
     }
 
     FillReceiverInfo(self, self->id, self->current_hub_id, NULL);
@@ -581,7 +607,7 @@ void hub_thread(void* hub_info, void *sim_config, void* self_conf) {
 
     while (1) { // while there are active senders or packages in either storage do
         int active_senders = 0;
-        pthread_mutex_lock(&sender_info_mutex);
+        LOCK_AND_CHECK(sender_info_mutex);
 
         for (int i = 0; i < simulation_config->hubs_count; i++) {
             // TODO: Do we count this hub's sender too??
@@ -593,22 +619,22 @@ void hub_thread(void* hub_info, void *sim_config, void* self_conf) {
                 active_senders++;
         }
 
-        pthread_mutex_unlock(&sender_info_mutex);
+        UNLOCK_AND_CHECK(sender_info_mutex);
 
-        pthread_mutex_lock(&hub_incoming_storage_mutexes[self->id-1]);
+        LOCK_AND_CHECK(hub_incoming_storage_mutexes[self->id-1]);
         int incoming_packages = self_config->incoming_storge_size - incoming_storage_remaining[self->id-1];
-        pthread_mutex_unlock(&hub_incoming_storage_mutexes[self->id-1]);
+        UNLOCK_AND_CHECK(hub_incoming_storage_mutexes[self->id-1]);
 
-        pthread_mutex_lock(&hub_outgoing_storage_mutexes[self->id-1]);
+        LOCK_AND_CHECK(hub_outgoing_storage_mutexes[self->id-1]);
         int outgoing_packages = self_config->outgoing_storge_size - outgoing_storage_remaining[self->id-1];
-        pthread_mutex_lock(&hub_outgoing_storage_mutexes[self->id-1]);
+        LOCK_AND_CHECK(hub_outgoing_storage_mutexes[self->id-1]);
     
         if ((active_senders == 0) && (incoming_packages == 0) && (outgoing_packages == 0))
             break;
 
         if (outgoing_packages > 0) { // WaitUntilPackageDeposited ()
             // Select the package
-            pthread_mutex_lock(&hub_outgoing_storage_mutexes[self->id-1]);
+            LOCK_AND_CHECK(hub_outgoing_storage_mutexes[self->id-1]);
 
             PackageInfo* package_will_sent = NULL;
 
@@ -620,7 +646,7 @@ void hub_thread(void* hub_info, void *sim_config, void* self_conf) {
                     break;
                 }
 
-            pthread_mutex_unlock(&hub_outgoing_storage_mutexes[self->id-1]);
+            UNLOCK_AND_CHECK(hub_outgoing_storage_mutexes[self->id-1]);
 
             if (package_will_sent == NULL) {
                 perror("unexpected: could not select package: package_will_sent");
@@ -630,12 +656,12 @@ void hub_thread(void* hub_info, void *sim_config, void* self_conf) {
 // TODO: This may be done in a better way...
 select_drones_loop:
             // Find drones...
-            pthread_mutex_lock(&hub_charging_spaces_mutexes[self->id-1]);
+            LOCK_AND_CHECK(hub_charging_spaces_mutexes[self->id-1]);
 
             // Check if there are drones in the hub
             if (charging_spaces_remaining[self->id-1] < self_config->charging_space_count) {
                 int drone_count_on_me = self_config->charging_space_count - charging_spaces_remaining[self->id-1];
-                pthread_mutex_unlock(&hub_charging_spaces_mutexes[self->id-1]);
+                UNLOCK_AND_CHECK(hub_charging_spaces_mutexes[self->id-1]);
 
                 DynamicDroneInfo** drones_on_me = malloc(sizeof(DynamicDroneInfo*) * drone_count_on_me);
 
@@ -644,13 +670,13 @@ select_drones_loop:
                     exit(1);
                 }
 
-                pthread_mutex_lock(&drone_info_mutex);
+                LOCK_AND_CHECK(drone_info_mutex);
 
                 for (int i = 0, dom_index = 0; i < simulation_config->drones_count; i++)
                     if ((drone_info_registry[i]->stat == DRONE_IN_HUB) && drone_info_registry[i]->hub_id == self->id)
                         drones_on_me[dom_index++] = drone_info_registry[i];
 
-                pthread_mutex_unlock(&drone_info_mutex);
+                UNLOCK_AND_CHECK(drone_info_mutex);
 
                 DynamicDroneInfo* drone_with_highest_range_on_me = NULL;
 
@@ -670,7 +696,7 @@ select_drones_loop:
                 drone_with_highest_range_on_me->stat = DRONE_ON_PACKAGE_TRANSFER;
                 drone_with_highest_range_on_me->info->packageInfo = package_will_sent;
             } else {
-                pthread_mutex_unlock(&hub_charging_spaces_mutexes[self->id-1]);
+                UNLOCK_AND_CHECK(hub_charging_spaces_mutexes[self->id-1]);
 
                 // TODO:
                 // CallDroneFromHubs ()
@@ -684,12 +710,12 @@ select_drones_loop:
                 for (int i = 0; i < total_hubs_count - 1; i++) { 
                     int other_hub_id = self_config->nearest_other_hubs_sorted[i];
 
-                    pthread_mutex_lock(&hub_charging_spaces_mutexes[other_hub_id-1]);
+                    LOCK_AND_CHECK(hub_charging_spaces_mutexes[other_hub_id-1]);
                     int drones_in_neighbor_hub = simulation_config->hubs[other_hub_id-1].charging_space_count - charging_spaces_remaining[other_hub_id-1];
-                    pthread_mutex_unlock(&hub_charging_spaces_mutexes[other_hub_id-1]);
+                    UNLOCK_AND_CHECK(hub_charging_spaces_mutexes[other_hub_id-1]);
                     
                     if (drones_in_neighbor_hub > 0) {
-                        pthread_mutex_lock(&drone_info_mutex); 
+                        LOCK_AND_CHECK(drone_info_mutex); 
 
                         for (int i = 0; i < simulation_config->drones_count; i++)
                             if ((drone_info_registry[i]->stat == DRONE_IN_HUB) && drone_info_registry[i]->hub_id == other_hub_id) {
@@ -697,7 +723,7 @@ select_drones_loop:
                                 break;
                             }
 
-                        pthread_mutex_unlock(&drone_info_mutex); 
+                        UNLOCK_AND_CHECK(drone_info_mutex); 
 
                         if (found_drone != NULL)
                             break;
@@ -706,7 +732,7 @@ select_drones_loop:
                 }
 
                 if (found_drone != NULL) {
-                    pthread_mutex_lock(&drone_info_mutex); 
+                    LOCK_AND_CHECK(drone_info_mutex); 
 
                     found_drone->stat = DRONE_ON_SELF_TRAVEL;
                     found_drone->info->next_hub_id = self->id;
@@ -714,7 +740,7 @@ select_drones_loop:
 
                     // NOTE: Should we submit the package to the drone right now, or should we enter the loop again and when the drone comes then we should do it?
 
-                    pthread_mutex_unlock(&drone_info_mutex); 
+                    UNLOCK_AND_CHECK(drone_info_mutex); 
                 } else {
                     _wait(UNIT_TIME);
                     goto select_drones_loop;
@@ -724,9 +750,9 @@ select_drones_loop:
     }
 
     // HubStopped ()
-    pthread_mutex_lock(&hub_info_mutex);
+    LOCK_AND_CHECK(hub_info_mutex);
     hub_activity_registry[self->id-1] = 0;
-    pthread_mutex_unlock(&hub_info_mutex);
+    UNLOCK_AND_CHECK(hub_info_mutex);
 
     FillHubInfo(self, self->id);
     LOG_SAFE(WriteOutput(NULL, NULL, NULL, self, HUB_STOPPED))
@@ -766,6 +792,33 @@ int main(int argc, char **argv, char **envp) {
 
     // TODO: Initizlize first HubInfo, DroneInfo, SenderInfo, ReceiverInfo objects
     //       Start threads
+
+    int rv;
+    pthread_t senders[sim_config->hubs_count];
+    SenderThreadConfig sender_confs[sim_config->hubs_count];
+
+    for (int i = 0; i < sim_config->hubs_count; i++) {
+        sender_confs[i].self = (SenderInfo*) malloc(sizeof(SenderInfo));
+        sender_confs[i].self->id = sim_config->hubs[i].sender.sender_id;
+        sender_confs[i].self->current_hub_id = sim_config->hubs[i].hub_id;
+        sender_confs[i].self->packageInfo = NULL;
+        sender_confs[i].self->remaining_package_count = sim_config->hubs[i].sender.total_packages;
+
+        sender_confs[i].self_config = &sim_config->hubs[i].sender;
+        sender_confs[i].simulation_config = sim_config;
+
+        if ((rv = pthread_create(&senders[i], NULL, sender_thread, &sender_confs[i])) != 0) {
+            fprintf(stderr, "pthread_create: %d\n", rv);
+            exit(1);
+        }
+    }
+    
+
+    for (int i = 0; i < sim_config->hubs_count; i++)
+        if ((rv = pthread_join(senders[i], NULL)) != 0) {
+            fprintf(stderr, "pthread_join: %d\n", rv);
+            exit(1);
+        }
 
     exit(0);
 }
