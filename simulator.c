@@ -8,6 +8,8 @@
 // - segfault in somewhere sometimez xd
 // - debug messages in receiver and drone threads.
 // test it!!!
+// new problems: - hubs select drones that max_charge << distance, so it never gets off from the hub, stuck in charging forever!
+//               - senders select ites own hub "randomly".
 
 #include "simulator.h"
 
@@ -63,13 +65,13 @@ pthread_mutex_t debug_printf_mutex;
 
 int __pth_lock_rv, __pth_unlock_rv;
 
-#define DEBUG_MUTEX_LOCK if (DEBUG_SIMULATOR) { if (pthread_mutex_lock(&debug_printf_mutex) != 0) { perror("\npthread_mutex_lock: in DEBUG_MUTEX_LOCK\n"); } }
-#define DEBUG_MUTEX_RELEASE if (DEBUG_SIMULATOR) { if (pthread_mutex_unlock(&debug_printf_mutex) != 0) { perror("\npthread_mutex_unlock: in DEBUG_MUTEX_RELEASE\n"); } }
-#define LOG_SAFE(x) if (DEBUG_SIMULATOR) { if (pthread_mutex_lock(&debug_printf_mutex) != 0) { perror("\npthread_mutex_lock: in LOG_SAFE\n"); } x; if (pthread_mutex_unlock(&debug_printf_mutex) != 0) { perror("\npthread_mutex_unlock: in LOG_SAFE\n"); } } else { x; }
-#define DEBUG_LOG_SAFE(x) if (DEBUG_SIMULATOR) { if (pthread_mutex_lock(&debug_printf_mutex) != 0) { perror("\npthread_mutex_lock: in DEBUG_LOG_SAFE\n"); } x; if (pthread_mutex_unlock(&debug_printf_mutex) != 0) { perror("\npthread_mutex_unlock: in DEBUG_LOG_SAFE\n"); } }
+#define DEBUG_MUTEX_LOCK if (DEBUG_SIMULATOR) { if (pthread_mutex_lock(&debug_printf_mutex) != 0) { perror("\n !!! pthread_mutex_lock: in DEBUG_MUTEX_LOCK\n"); } }
+#define DEBUG_MUTEX_RELEASE if (DEBUG_SIMULATOR) { if (pthread_mutex_unlock(&debug_printf_mutex) != 0) { perror("\n !!! pthread_mutex_unlock: in DEBUG_MUTEX_RELEASE\n"); } }
+#define LOG_SAFE(x) if (DEBUG_SIMULATOR) { if (pthread_mutex_lock(&debug_printf_mutex) != 0) { perror("\n !!! pthread_mutex_lock: in LOG_SAFE\n"); } x; if (pthread_mutex_unlock(&debug_printf_mutex) != 0) { perror("\n !!! pthread_mutex_unlock: in LOG_SAFE\n"); } } else { x; }
+#define DEBUG_LOG_SAFE(x) if (DEBUG_SIMULATOR) { if (pthread_mutex_lock(&debug_printf_mutex) != 0) { perror("\n !!! pthread_mutex_lock: in DEBUG_LOG_SAFE\n"); } x; if (pthread_mutex_unlock(&debug_printf_mutex) != 0) { perror("\n !!! pthread_mutex_unlock: in DEBUG_LOG_SAFE\n"); } }
 
-#define LOCK_AND_CHECK(x) { if ((__pth_lock_rv = pthread_mutex_lock(&x)) != 0) { fprintf(stderr, "\npthread_mutex_lock: in LOCK_AND_CHECK(" #x "): %d in %s:%d\n", __pth_lock_rv, __FILE__, __LINE__); } }
-#define UNLOCK_AND_CHECK(x) { if ((__pth_unlock_rv = pthread_mutex_unlock(&x)) != 0) { fprintf(stderr, "\npthread_mutex_unlock: in UNLOCK_AND_CHECK(" #x "): %d in %s:%d\n", __pth_unlock_rv, __FILE__, __LINE__); } }
+#define LOCK_AND_CHECK(x) { if ((__pth_lock_rv = pthread_mutex_lock(&x)) != 0) { fprintf(stderr, "\n !!! pthread_mutex_lock: in LOCK_AND_CHECK(" #x "): %d in %s:%d\n", __pth_lock_rv, __FILE__, __LINE__); } }
+#define UNLOCK_AND_CHECK(x) { if ((__pth_unlock_rv = pthread_mutex_unlock(&x)) != 0) { fprintf(stderr, "\n !!! pthread_mutex_unlock: in UNLOCK_AND_CHECK(" #x "): %d in %s:%d\n", __pth_unlock_rv, __FILE__, __LINE__); } }
 
 #define MIN(a,b) (((a)<(b))?(a):(b))
 
@@ -607,12 +609,14 @@ void* receiver_thread(void* _receiver_thread_config) {
 
         if (!hub_activity_registry[self->current_hub_id-1]) {
             UNLOCK_AND_CHECK(hub_info_mutex);
+            DEBUG_LOG_SAFE(printf("Receiver Thread %d: My hub is not active, exiting.\n", self->id))
             break;
         }
 
         UNLOCK_AND_CHECK(hub_info_mutex);
         
         LOCK_AND_CHECK(hub_incoming_storage_mutexes[self->current_hub_id-1]);
+        // DEBUG_LOG_SAFE(printf("Receiver Thread %d: Checking incoming packages...\n", self->id))
 
         for (int package_index = 0; package_index < simulation_config->hubs[self->current_hub_id-1].incoming_storge_size; package_index++)
             if (incoming_storages[self->current_hub_id-1][package_index] != NULL)
@@ -623,6 +627,8 @@ void* receiver_thread(void* _receiver_thread_config) {
                     FillPacketInfo(incoming_package, incoming_package->sender_id, incoming_package->sending_hub_id, incoming_package->receiver_id, self->current_hub_id);
                     FillReceiverInfo(self, self->id, self->current_hub_id, incoming_package);
                     LOG_SAFE(WriteOutput(NULL, self, NULL, NULL, RECEIVER_PICKUP))
+
+                    DEBUG_LOG_SAFE(printf("Receiver Thread %d: Got package from sender-%d, hub-%d.\n", self->id, incoming_package->sender_id, incoming_package->sending_hub_id))
 
                     // TODO: Do this
                     // BUT: Be careful for double-freeing
@@ -700,8 +706,7 @@ void* hub_thread(void* _hub_thread_config) {
                 }
 
             UNLOCK_AND_CHECK(hub_outgoing_storage_mutexes[self->id-1]);
-
-            DEBUG_LOG_SAFE(printf("Hub Thread %d: Package to send: (index: %d) %p\n", self->id, package_will_sent_index_in_outgoing, package_will_sent))
+            DEBUG_LOG_SAFE(printf("Hub Thread %d: Package to send: (index: %d) %p (sender: %d, from hub: %d)\n", self->id, package_will_sent_index_in_outgoing, package_will_sent, package_will_sent == NULL ? -1 : package_will_sent->sender_id, package_will_sent == NULL ? -1 : package_will_sent->sending_hub_id))
 
             // A drone may be reserved a space to send a package!!
             // UPDATE: NOOOOO!!!!! ONLY SENDERS PUT PACKAGES TO OUTGOING STORAGE!!!!
@@ -870,8 +875,10 @@ void* drone_thread(void* _drone_thread_config) {
 
         UNLOCK_AND_CHECK(hub_info_mutex)
 
-        if (!there_are_active_hubs)
+        if (!there_are_active_hubs) {
+            DEBUG_LOG_SAFE(printf("Drone Thread %d: There are no active hubs, exiting...\n", self->id))
             break;
+        }
 
         LOCK_AND_CHECK(drone_info_mutex)
         DynamicDroneInfo* dyn_info = drone_info_registry[self->id-1];
@@ -881,7 +888,9 @@ void* drone_thread(void* _drone_thread_config) {
         PackageInfo* delivery_package = dyn_info->info->packageInfo;
 
         switch (dyn_info->stat) {
-            case DRONE_ON_PACKAGE_TRANSFER:
+            case DRONE_ON_PACKAGE_TRANSFER: 
+                DEBUG_LOG_SAFE(printf("Drone Thread %d: DRONE_ON_PACKAGE_TRANSFER: from sender-%d to receiver-%d\n", self->id, delivery_package->sender_id, delivery_package->receiver_id))
+
                 // TODO: Change this to pthread_cond_t or semaphore
                 while (1) {
                     int _done = 0;   
@@ -897,6 +906,7 @@ void* drone_thread(void* _drone_thread_config) {
                         drones_reserved_place_on_hub[delivery_hub_id-1]++;
 
                         _done = 1;
+                        DEBUG_LOG_SAFE(printf("Drone Thread %d: DRONE_ON_PACKAGE_TRANSFER: Reserved charging space and incoming package space\n", self->id))
                     }
 
                     UNLOCK_AND_CHECK(hub_incoming_storage_mutexes[delivery_hub_id-1])
@@ -910,21 +920,25 @@ void* drone_thread(void* _drone_thread_config) {
 
                 int distance_between_hubs = simulation_config->hubs[self->current_hub_id-1].distance_to_other_hubs[delivery_hub_id-1];
 
+                DEBUG_LOG_SAFE(printf("Drone Thread %d: DRONE_ON_PACKAGE_TRANSFER: Current charge: %d\n", self->id, self->current_range))
+
                 // WaitForRange ()
                 while (self->current_range < distance_between_hubs) {
                     LOCK_AND_CHECK(drone_info_mutex)
                     self->current_range = calculate_drone_charge(timeInMilliseconds() - the_timestamp_on_start, self->current_range, self_config->maximum_range);
                     UNLOCK_AND_CHECK(drone_info_mutex)
                 }
+
+                DEBUG_LOG_SAFE(printf("Drone Thread %d: DRONE_ON_PACKAGE_TRANSFER: After charging: %d\n", self->id, self->current_range))
                 
                 LOCK_AND_CHECK(drone_info_mutex)
                 FillPacketInfo(delivery_package, delivery_package->sender_id, delivery_package->sending_hub_id, delivery_package->receiver_id, delivery_package->receiving_hub_id);
                 FillDroneInfo(self, self->id, self->current_hub_id, self->current_range, delivery_package, 0);
-                UNLOCK_AND_CHECK(drone_info_mutex)
+                // UNLOCK_AND_CHECK(drone_info_mutex)
                 LOG_SAFE(WriteOutput(NULL, NULL, self, NULL, DRONE_PICKUP))
 
                 travel(distance_between_hubs, self_config->travel_speed); // Sleep the duration of travel
-                LOCK_AND_CHECK(drone_info_mutex)
+                // LOCK_AND_CHECK(drone_info_mutex)
                 self->current_range = self->current_range - range_decrease(distance_between_hubs, self_config->travel_speed); // CurrentRange ← CurrentRange − (Distance/Speed)
                 UNLOCK_AND_CHECK(drone_info_mutex)
 
@@ -943,19 +957,22 @@ void* drone_thread(void* _drone_thread_config) {
                         delivery_done = 1;
                         break;
                     }
+                DEBUG_LOG_SAFE(printf("Drone Thread %d: DRONE_ON_PACKAGE_TRANSFER: Done delivery to hub: %d\n", self->id, delivery_hub_id))
                 UNLOCK_AND_CHECK(hub_incoming_storage_mutexes[delivery_hub_id-1])
 
                 if (!delivery_done) {
-                    DEBUG_LOG_SAFE(fprintf(stderr, "Drone Thread %d: Could not find a plave tp put the incoming package!! (from hub: %d, to hub: %d)\n", self->id, self->current_hub_id, delivery_hub_id))
+                    DEBUG_LOG_SAFE(fprintf(stderr, " !!! Drone Thread %d: Could not find a plave tp put the incoming package!! (from hub: %d, to hub: %d)\n", self->id, self->current_hub_id, delivery_hub_id))
                     exit(1);
                 }
 
                 LOCK_AND_CHECK(hub_charging_spaces_mutexes[self->current_hub_id-1])
                 charging_spaces_remaining[self->current_hub_id-1]++;
+                DEBUG_LOG_SAFE(printf("Drone Thread %d: DRONE_ON_PACKAGE_TRANSFER: Incr charging space counter on old hub: %d\n", self->id, self->current_hub_id))
                 UNLOCK_AND_CHECK(hub_charging_spaces_mutexes[self->current_hub_id-1])
 
                 LOCK_AND_CHECK(hub_charging_spaces_mutexes[delivery_hub_id-1])
                 drones_reserved_place_on_hub[delivery_hub_id-1]--;
+                DEBUG_LOG_SAFE(printf("Drone Thread %d: DRONE_ON_PACKAGE_TRANSFER: Decr reserved charging space counter on new hub: %d\n", self->id, delivery_hub_id))
                 UNLOCK_AND_CHECK(hub_charging_spaces_mutexes[delivery_hub_id-1])
 
                 // CurrentHub ← DestinationHub
@@ -966,16 +983,19 @@ void* drone_thread(void* _drone_thread_config) {
                 dyn_info->info->current_range = self->current_range;
                 dyn_info->package_will_sent_index_in_outgoing = -1;
                 dyn_info->stat = DRONE_ON_HUB;
+                DEBUG_LOG_SAFE(printf("Drone Thread %d: DRONE_ON_PACKAGE_TRANSFER: Updated dynamic info: new hub: %d\n", self->id, self->current_hub_id))
                 UNLOCK_AND_CHECK(drone_info_mutex)
                 
                 // TODO:: LAST!
                 // FillPacketInfo(PackageInfo, SenderID, SendingHub, ReceiverID,
                 // ReceivingHub )
-                // FillDroneInfo(DroneInfo, ID, CurrentHub, CurrentRange, PackageInfo, 0) WriteOutput(NULL, NULL, DroneInfo, NULL, DRONE_DEPOSITED)
+                // FillDroneInfo(DroneInfo, ID, CurrentHub, CurrentRange, PackageInfo, 0)
+                // WriteOutput(NULL, NULL, DroneInfo, NULL, DRONE_DEPOSITED)
 
                 LOCK_AND_CHECK(drone_info_mutex)
                 FillPacketInfo(delivery_package, delivery_package->sender_id, delivery_package->sending_hub_id, delivery_package->receiver_id, delivery_package->receiving_hub_id);
                 FillDroneInfo(self, self->id, self->current_hub_id, self->current_range, delivery_package, 0);
+                LOG_SAFE(WriteOutput(NULL, NULL, self, NULL, DRONE_DEPOSITED))
                 UNLOCK_AND_CHECK(drone_info_mutex)
 
                 break;
@@ -1063,7 +1083,7 @@ int main(int argc, char **argv, char **envp) {
         drone_info_registry[i]->info = drone_confs[i].self;
 
         if ((rv = pthread_create(&drone_pthreads[i], NULL, drone_thread, &drone_confs[i])) != 0) {
-            fprintf(stderr, "pthread_create/drone: %d\n", rv);
+            fprintf(stderr, " !!! pthread_create/drone: %d\n", rv);
             exit(1);
         }
     }
@@ -1079,7 +1099,7 @@ int main(int argc, char **argv, char **envp) {
         sender_confs[i].simulation_config = sim_config;
 
         if ((rv = pthread_create(&sender_pthreads[i], NULL, sender_thread, &sender_confs[i])) != 0) {
-            fprintf(stderr, "pthread_create/sender: %d\n", rv);
+            fprintf(stderr, " !!! pthread_create/sender: %d\n", rv);
             exit(1);
         }
 
@@ -1092,7 +1112,7 @@ int main(int argc, char **argv, char **envp) {
         receiver_confs[i].simulation_config = sim_config;
 
         if ((rv = pthread_create(&receiver_pthreads[i], NULL, receiver_thread, &receiver_confs[i])) != 0) {
-            fprintf(stderr, "pthread_create/receiver: %d\n", rv);
+            fprintf(stderr, " !!! pthread_create/receiver: %d\n", rv);
             exit(1);
         }
 
@@ -1103,31 +1123,31 @@ int main(int argc, char **argv, char **envp) {
         hub_confs[i].simulation_config = sim_config;
 
         if ((rv = pthread_create(&hub_pthreads[i], NULL, hub_thread, &hub_confs[i])) != 0) {
-            fprintf(stderr, "pthread_create/hub: %d\n", rv);
+            fprintf(stderr, " !!! pthread_create/hub: %d\n", rv);
             exit(1);
         }
     }
 
     for (int i = 0; i < sim_config->hubs_count; i++) {
         if ((rv = pthread_join(sender_pthreads[i], NULL)) != 0) {
-            fprintf(stderr, "pthread_join/sender: %d\n", rv);
+            fprintf(stderr, " !!! pthread_join/sender: %d\n", rv);
             exit(1);
         }
 
         if ((rv = pthread_join(receiver_pthreads[i], NULL)) != 0) {
-            fprintf(stderr, "pthread_join/receiver: %d\n", rv);
+            fprintf(stderr, " !!! pthread_join/receiver: %d\n", rv);
             exit(1);
         }
 
         if ((rv = pthread_join(hub_pthreads[i], NULL)) != 0) {
-            fprintf(stderr, "pthread_join/hub: %d\n", rv);
+            fprintf(stderr, " !!! pthread_join/hub: %d\n", rv);
             exit(1);
         }
     }
     
     for (int i = 0; i < sim_config->drones_count; i++)
         if ((rv = pthread_join(drone_pthreads[i], NULL)) != 0) {
-            fprintf(stderr, "pthread_join/drone: %d\n", rv);
+            fprintf(stderr, " !!! pthread_join/drone: %d\n", rv);
             exit(1);
         }
 
