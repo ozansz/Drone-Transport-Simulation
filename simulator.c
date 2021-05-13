@@ -510,7 +510,11 @@ void* sender_thread(void* _sender_thread_config) {
 
         srand(time(NULL));
         
-        int hub_index = rand() % active_hubs_count;
+        int hub_index = self->current_hub_id - 1;
+
+        while (hub_index == (self->current_hub_id - 1))
+            hub_index  = rand() % active_hubs_count;
+
         int hub_id = -1;
 
         for (int i = 0; i < total_hubs_count; i++) 
@@ -524,7 +528,7 @@ void* sender_thread(void* _sender_thread_config) {
             }
 
         if (hub_id == -1) {
-            perror("unexpected: hub_id = -1");
+            perror(" !!! unexpected: hub_id = -1");
             exit(1);
         }
 
@@ -829,6 +833,9 @@ select_drones_loop:
                     UNLOCK_AND_CHECK(drone_info_mutex); 
 
                     DEBUG_LOG_SAFE(printf("Hub Thread %d: Assigned package to neighbor drone-%d!\n", self->id, found_drone->info->id))
+
+                    // TODO: EDIT HERE!
+                    // WaitTimeoutOrDrone: Wait a specific duration until a drone arrives. The specific duration is 1 units of time. Time units will be explained later.
                 } else {
                     UNLOCK_AND_CHECK(drone_info_mutex); 
                     _wait(UNIT_TIME);
