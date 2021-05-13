@@ -1,3 +1,8 @@
+// TODO:
+//       - editing "self" s may cause fuckups, as they are also regisered in critical data structures -shared arrays-
+//       - FillXXXInfo needs to be wrapped inside mutex lock/unlocks
+
+
 #include "simulator.h"
 
 SimulationConfig* sim_config = NULL;
@@ -15,7 +20,7 @@ int* hub_activity_registry = NULL; // int used as bo0l
 typedef enum {
     DRONE_ON_PACKAGE_TRANSFER,
     DRONE_ON_SELF_TRAVEL,
-    DRONE_IN_HUB
+    DRONE_ON_HUB
 } DroneStatus;
 
 typedef struct {
@@ -23,6 +28,7 @@ typedef struct {
     int hub_id;
     // PackageInfo* pkg;
     DroneInfo* info;
+    int package_will_sent_index_in_outgoing;
 } DynamicDroneInfo;
 
 pthread_mutex_t drone_info_mutex;
@@ -43,6 +49,7 @@ int* incoming_storage_remaining = NULL;
 PackageInfo*** incoming_storages = NULL; 
 int* outgoing_storage_remaining = NULL; // hub look at (outgoing_storage_remaining < self.outgoing_capacity)
 PackageInfo*** outgoing_storages = NULL; 
+int* drones_reserved_place_on_hub = NULL;
 int* charging_spaces_remaining = NULL; // hub look at (charging_spaces_remaining < self.charging_capacity)
 
 // IMPORTANT NOTE: We need to lock this mutex before using WriteOutput() !!!
@@ -57,6 +64,11 @@ int __pth_lock_rv, __pth_unlock_rv;
 
 #define LOCK_AND_CHECK(x) { if ((__pth_lock_rv = pthread_mutex_lock(&x)) != 0) { fprintf(stderr, "pthread_mutex_lock: in LOCK_AND_CHECK(" #x "): %d", __pth_lock_rv); } }
 #define UNLOCK_AND_CHECK(x) { if ((__pth_unlock_rv = pthread_mutex_unlock(&x)) != 0) { fprintf(stderr, "pthread_mutex_unlock: in UNLOCK_AND_CHECK(" #x "): %d", __pth_unlock_rv); } }
+
+#define MIN(a,b) (((a)<(b))?(a):(b))
+
+// TODO: Try this later...
+#define FREE_AND_NULL(x) {free(x); x = NULL;}
 
 void defer(void) {
     if (DEBUG_SIMULATOR)
@@ -227,6 +239,13 @@ void defer(void) {
 
         free(charging_spaces_remaining);
     }
+
+    if (drones_reserved_place_on_hub != NULL) {
+        if (DEBUG_SIMULATOR)
+            printf(" ++ Freeing drones_reserved_place_on_hub\n");
+
+        free(drones_reserved_place_on_hub);
+    }
     
     if (hub_activity_registry != NULL) {
         if (DEBUG_SIMULATOR)
@@ -320,6 +339,16 @@ void init_critical_structures(SimulationConfig* conf) {
     }
 
     if (DEBUG_SIMULATOR)
+        printf("[*] Allocating drones_reserved_place_on_hub\n");
+    
+    drones_reserved_place_on_hub = (int*) malloc(sizeof(int) * conf->hubs_count);
+
+    if (drones_reserved_place_on_hub == NULL) {
+        perror("malloc/drones_reserved_place_on_hub");
+        exit(1);
+    }
+
+    if (DEBUG_SIMULATOR)
         printf("[*] Allocating hub_activity_registry\n");
 
     hub_activity_registry = (int*) malloc(sizeof(int) * conf->hubs_count);
@@ -363,6 +392,7 @@ void init_critical_structures(SimulationConfig* conf) {
         incoming_storage_remaining[i] = conf->hubs[i].incoming_storge_size;
         outgoing_storage_remaining[i] = conf->hubs[i].outgoing_storge_size;
         charging_spaces_remaining[i] = conf->hubs[i].charging_space_count;
+        drones_reserved_place_on_hub[i] = 0;
         hub_activity_registry[i] = 1;
         sender_activity_registry[i] = 1;
 
@@ -433,8 +463,8 @@ void init_critical_structures(SimulationConfig* conf) {
         // drone_info_registry[i]->info->next_hub_id = -1;
         // drone_info_registry[i]->info->packageInfo = NULL;
         drone_info_registry[i]->info = NULL;
-
-        drone_info_registry[i]->stat = DRONE_IN_HUB;
+        drone_info_registry[i]->package_will_sent_index_in_outgoing = -1;
+        drone_info_registry[i]->stat = DRONE_ON_HUB;
     }
 
 }
@@ -552,7 +582,7 @@ void* sender_thread(void* _sender_thread_config) {
     return NULL;
 }
 
-void receiver_thread(void* _receiver_thread_config) {
+void* receiver_thread(void* _receiver_thread_config) {
     ReceiverThreadConfig* receiver_thread_config = (ReceiverThreadConfig*) _receiver_thread_config;
     ReceiverInfo* self = (ReceiverInfo*) receiver_thread_config->self;
     ReceiverConfig* self_config = (ReceiverConfig*) receiver_thread_config->self_config;
@@ -597,10 +627,12 @@ void receiver_thread(void* _receiver_thread_config) {
     FillReceiverInfo(self, self->id, self->current_hub_id, NULL);
     LOG_SAFE(WriteOutput(NULL, self, NULL, NULL, RECEIVER_STOPPED))
 
+    DEBUG_LOG_SAFE(printf("Receiver Thread %d: Exiting...\n", self->id))
+
     return NULL;
 }
 
-void hub_thread(void* _hub_thread_config) {
+void* hub_thread(void* _hub_thread_config) {
     HubThreadConfig* hub_thread_config = (HubThreadConfig*) _hub_thread_config;
     HubInfo* self = (HubInfo*) hub_thread_config->self;
     HubConfig* self_config = (HubConfig*) hub_thread_config->self_config;
@@ -641,18 +673,28 @@ void hub_thread(void* _hub_thread_config) {
             LOCK_AND_CHECK(hub_outgoing_storage_mutexes[self->id-1]);
 
             PackageInfo* package_will_sent = NULL;
+            int package_will_sent_index_in_outgoing = -1;
 
             for (int i = 0; i < self_config->outgoing_storge_size; i++)
                 if (outgoing_storages[self->id-1][i] != NULL) {
                     package_will_sent = outgoing_storages[self->id-1][i];
-                    outgoing_storages[self->id-1][i] = NULL;
-                    outgoing_storage_remaining[self->id-1]++;
+                    package_will_sent_index_in_outgoing = i;
+                    // outgoing_storages[self->id-1][i] = NULL;
+                    // outgoing_storage_remaining[self->id-1]++;
+                    // IMPORTANT: Drone will do these!!!
                     break;
                 }
 
             UNLOCK_AND_CHECK(hub_outgoing_storage_mutexes[self->id-1]);
 
+            // A drone may be reserved a space to send a package!!
+            // UPDATE: NOOOOO!!!!! ONLY SENDERS PUT PACKAGES TO OUTGOING STORAGE!!!!
             if (package_will_sent == NULL) {
+                // perror("unexpected: could not select package: package_will_sent");
+                // exit(1);
+                
+                // continue; // FALSY!!
+
                 perror("unexpected: could not select package: package_will_sent");
                 exit(1);
             }
@@ -663,8 +705,9 @@ select_drones_loop:
             LOCK_AND_CHECK(hub_charging_spaces_mutexes[self->id-1]);
 
             // Check if there are drones in the hub
-            if (charging_spaces_remaining[self->id-1] < self_config->charging_space_count) {
-                int drone_count_on_me = self_config->charging_space_count - charging_spaces_remaining[self->id-1];
+            int drone_count_on_me = self_config->charging_space_count - (charging_spaces_remaining[self->id-1] - drones_reserved_place_on_hub[self->id-1]);
+            if (drone_count_on_me > 0) {
+                // OLD: int drone_count_on_me = self_config->charging_space_count - charging_spaces_remaining[self->id-1];
                 UNLOCK_AND_CHECK(hub_charging_spaces_mutexes[self->id-1]);
 
                 DynamicDroneInfo** drones_on_me = malloc(sizeof(DynamicDroneInfo*) * drone_count_on_me);
@@ -677,7 +720,7 @@ select_drones_loop:
                 LOCK_AND_CHECK(drone_info_mutex);
 
                 for (int i = 0, dom_index = 0; i < simulation_config->drones_count; i++)
-                    if ((drone_info_registry[i]->stat == DRONE_IN_HUB) && drone_info_registry[i]->hub_id == self->id)
+                    if ((drone_info_registry[i]->stat == DRONE_ON_HUB) && drone_info_registry[i]->hub_id == self->id)
                         drones_on_me[dom_index++] = drone_info_registry[i];
 
                 UNLOCK_AND_CHECK(drone_info_mutex);
@@ -698,11 +741,12 @@ select_drones_loop:
                 // assign the package to the drone
                 // AssignAndNotifyDrone (Package, Drone)
                 drone_with_highest_range_on_me->stat = DRONE_ON_PACKAGE_TRANSFER;
+                drone_with_highest_range_on_me->package_will_sent_index_in_outgoing = package_will_sent_index_in_outgoing;
                 drone_with_highest_range_on_me->info->packageInfo = package_will_sent;
+                drone_with_highest_range_on_me->info->next_hub_id = package_will_sent->receiving_hub_id;
             } else {
                 UNLOCK_AND_CHECK(hub_charging_spaces_mutexes[self->id-1]);
 
-                // TODO:
                 // CallDroneFromHubs ()
                 // if No drone is found in other hubs then
                 //     WaitTimeoutOrDrone ()
@@ -715,14 +759,14 @@ select_drones_loop:
                     int other_hub_id = self_config->nearest_other_hubs_sorted[i];
 
                     LOCK_AND_CHECK(hub_charging_spaces_mutexes[other_hub_id-1]);
-                    int drones_in_neighbor_hub = simulation_config->hubs[other_hub_id-1].charging_space_count - charging_spaces_remaining[other_hub_id-1];
+                    int drones_in_neighbor_hub = simulation_config->hubs[other_hub_id-1].charging_space_count - (charging_spaces_remaining[other_hub_id-1] - drones_reserved_place_on_hub[other_hub_id-1]);
                     UNLOCK_AND_CHECK(hub_charging_spaces_mutexes[other_hub_id-1]);
                     
                     if (drones_in_neighbor_hub > 0) {
                         LOCK_AND_CHECK(drone_info_mutex); 
 
                         for (int i = 0; i < simulation_config->drones_count; i++)
-                            if ((drone_info_registry[i]->stat == DRONE_IN_HUB) && drone_info_registry[i]->hub_id == other_hub_id) {
+                            if ((drone_info_registry[i]->stat == DRONE_ON_HUB) && drone_info_registry[i]->hub_id == other_hub_id) {
                                 found_drone = drone_info_registry[i];
                                 break;
                             }
@@ -741,6 +785,7 @@ select_drones_loop:
                     found_drone->stat = DRONE_ON_SELF_TRAVEL;
                     found_drone->info->next_hub_id = self->id;
                     found_drone->info->packageInfo = package_will_sent;
+                    found_drone->package_will_sent_index_in_outgoing = package_will_sent_index_in_outgoing;
 
                     // NOTE: Should we submit the package to the drone right now, or should we enter the loop again and when the drone comes then we should do it?
 
@@ -761,10 +806,12 @@ select_drones_loop:
     FillHubInfo(self, self->id);
     LOG_SAFE(WriteOutput(NULL, NULL, NULL, self, HUB_STOPPED))
 
+    DEBUG_LOG_SAFE(printf("Hub Thread %d: Exiting...\n", self->id))
+
     return NULL;
 }
 
-void drone_thread(void* _drone_thread_config) {
+void* drone_thread(void* _drone_thread_config) {
     DroneThreadConfig* drone_thread_config = (DroneThreadConfig*) _drone_thread_config;
     DroneInfo* self = (DroneInfo*) drone_thread_config->self;
     DroneConfig* self_config = (DroneConfig*) drone_thread_config->self_config;
@@ -773,7 +820,131 @@ void drone_thread(void* _drone_thread_config) {
     DEBUG_LOG_SAFE(printf("Drone Thread awake (id: %d, on hub: %d)\n", self->id, self->current_hub_id))
     LOG_SAFE(WriteOutput(NULL, NULL, self, NULL, DRONE_CREATED))
 
-    // TODO: Implement me :)
+    int there_are_active_hubs;
+
+    while (1) {
+        there_are_active_hubs = 0;
+
+        LOCK_AND_CHECK(hub_info_mutex)
+
+        for (int i = 0; i < total_hubs_count; i++)
+            if (hub_activity_registry[i]) {
+                there_are_active_hubs = 1;
+                break;
+            }
+
+        UNLOCK_AND_CHECK(hub_info_mutex)
+
+        if (!there_are_active_hubs)
+            break;
+
+        LOCK_AND_CHECK(drone_info_mutex)
+        DynamicDroneInfo* dyn_info = drone_info_registry[self->id-1];
+        UNLOCK_AND_CHECK(drone_info_mutex)
+
+        switch (dyn_info->stat) {
+            case DRONE_ON_PACKAGE_TRANSFER:
+                int delivery_hub_id = dyn_info->info->next_hub_id;
+                PackageInfo* delivery_package = dyn_info->info->packageInfo;
+
+                // TODO: Change this to pthread_cond_t or semaphore
+                while (1) {
+                    int _done = 0;   
+
+                    LOCK_AND_CHECK(hub_charging_spaces_mutexes[delivery_hub_id-1])
+                    LOCK_AND_CHECK(hub_incoming_storage_mutexes[delivery_hub_id-1])
+                    
+                    if ((charging_spaces_remaining[delivery_hub_id-1] > 0) && (incoming_storage_remaining[delivery_hub_id-1] > 0)) {
+                        // Reserve package space for me!
+                        incoming_storage_remaining[delivery_hub_id-1]--;
+                        // Reserve charging space for me!
+                        charging_spaces_remaining[delivery_hub_id-1]--;
+                        drones_reserved_place_on_hub[delivery_hub_id-1]++;
+
+                        _done = 1;
+                    }
+
+                    UNLOCK_AND_CHECK(hub_incoming_storage_mutexes[delivery_hub_id-1])
+                    UNLOCK_AND_CHECK(hub_charging_spaces_mutexes[delivery_hub_id-1])
+
+                    if (_done)
+                        break;
+                }
+
+                long long the_timestamp_on_start = timeInMilliseconds();
+
+                int distance_between_hubs = simulation_config->hubs[self->current_hub_id-1].distance_to_other_hubs[delivery_hub_id-1];
+
+                // WaitForRange ()
+                while (self->current_range < distance_between_hubs)
+                    self->current_range = calculate_drone_charge(timeInMilliseconds() - the_timestamp_on_start, self->current_range, self_config->maximum_range);
+                
+                FillPacketInfo(delivery_package, delivery_package->sender_id, delivery_package->sending_hub_id, delivery_package->receiver_id, delivery_package->receiving_hub_id);
+                FillDroneInfo(self, self->id, self->current_hub_id, self->current_range, delivery_package, 0);
+                LOG_SAFE(WriteOutput(NULL, NULL, self, NULL, DRONE_PICKUP))
+
+                travel(distance_between_hubs, self_config->travel_speed); // Sleep the duration of travel
+                self->current_range = self->current_range - range_decrease(distance_between_hubs, self_config->travel_speed); // CurrentRange ← CurrentRange − (Distance/Speed)
+
+                // DropPackageToHub (Package)
+                LOCK_AND_CHECK(hub_outgoing_storage_mutexes[self->current_hub_id-1])
+                outgoing_storages[self->current_hub_id-1][dyn_info->package_will_sent_index_in_outgoing] = NULL;
+                outgoing_storage_remaining[self->current_hub_id-1]++;
+                UNLOCK_AND_CHECK(hub_outgoing_storage_mutexes[self->current_hub_id-1])
+
+                int delivery_done = 0;
+
+                LOCK_AND_CHECK(hub_incoming_storage_mutexes[delivery_hub_id-1])  
+                for (int i = 0; i < simulation_config->hubs[delivery_hub_id-1].incoming_storge_size; i++)
+                    if (incoming_storages[delivery_hub_id-1][i] == NULL) {
+                        incoming_storages[delivery_hub_id-1][i] = delivery_package;
+                        delivery_done = 1;
+                        break;
+                    }
+                UNLOCK_AND_CHECK(hub_incoming_storage_mutexes[delivery_hub_id-1])
+
+                if (!delivery_done) {
+                    DEBUG_LOG_SAFE(fprintf(stderr, "Drone Thread %d: Could not find a plave tp put the incoming package!! (from hub: %d, to hub: %d)\n", self->id, self->current_hub_id, delivery_hub_id))
+                    exit(1);
+                }
+
+                LOCK_AND_CHECK(hub_charging_spaces_mutexes[self->current_hub_id-1])
+                charging_spaces_remaining[self->current_hub_id-1]++;
+                UNLOCK_AND_CHECK(hub_charging_spaces_mutexes[self->current_hub_id-1])
+
+                LOCK_AND_CHECK(hub_charging_spaces_mutexes[delivery_hub_id-1])
+                drones_reserved_place_on_hub[delivery_hub_id-1]--;
+                UNLOCK_AND_CHECK(hub_charging_spaces_mutexes[delivery_hub_id-1])
+
+                // CurrentHub ← DestinationHub
+                LOCK_AND_CHECK(drone_info_mutex)
+                self->current_hub_id = delivery_hub_id;
+                dyn_info->hub_id = self->current_hub_id;
+                dyn_info->info->current_hub_id = self->current_hub_id; // this is probably "gereksiz", as dyn_info->info == self, but anyways!
+                dyn_info->info->current_range = self->current_range;
+                dyn_info->package_will_sent_index_in_outgoing = -1;
+                dyn_info->stat = DRONE_ON_HUB;
+                UNLOCK_AND_CHECK(drone_info_mutex)
+                
+                // TODO:: LAST!
+                // FillPacketInfo(PackageInfo, SenderID, SendingHub, ReceiverID,
+                // ReceivingHub )
+                // FillDroneInfo(DroneInfo, ID, CurrentHub, CurrentRange, PackageInfo, 0) WriteOutput(NULL, NULL, DroneInfo, NULL, DRONE_DEPOSITED)
+
+                break;
+            case DRONE_ON_SELF_TRAVEL:
+                
+                break;
+            case DRONE_ON_HUB:
+                
+                break;
+            default:
+                DEBUG_LOG_SAFE(printf("Drone Thread %d: drone_info_registry[%d]->stat = %d, UNEXPECTED!!! OUT OF BOUNDS!!!\n", self->id, self->id-1, drone_info_registry[self->id-1]->stat))
+                exit(1);
+        }
+    }
+
+    DEBUG_LOG_SAFE(printf("Drone Thread %d: Exiting...\n", self->id))
 
     return NULL;
 }
