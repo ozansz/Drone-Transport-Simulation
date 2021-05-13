@@ -3,7 +3,8 @@
 //       - FillXXXInfo needs to be wrapped inside mutex lock/unlocks
 
 // i think the upper ones are done, i need to do:
-// - fix this: "unexpected: could not select drone: drone_with_highest_range_on_me: Success"
+// -##DONE##- fix this: "unexpected: could not select drone: drone_with_highest_range_on_me: Success"
+// = complete drone code!
 // - segfault in somewhere sometimez xd
 // - debug messages in receiver and drone threads.
 // test it!!!
@@ -718,11 +719,15 @@ void* hub_thread(void* _hub_thread_config) {
 select_drones_loop:
             // Find drones...
             // Check if there are drones in the hub
-            LOCK_AND_CHECK(hub_charging_spaces_mutexes[self->id-1]);
-            int drone_count_on_me = self_config->charging_space_count - (charging_spaces_remaining[self->id-1] - drones_reserved_place_on_hub[self->id-1]);
-            UNLOCK_AND_CHECK(hub_charging_spaces_mutexes[self->id-1]);
-            
-            DEBUG_LOG_SAFE(printf("Hub Thread %d: Drones on me: %d\n", self->id, drone_count_on_me))
+            // LOCK_AND_CHECK(hub_charging_spaces_mutexes[self->id-1]);
+            LOCK_AND_CHECK(drone_info_mutex)
+            int drone_count_on_me = 0;
+            for (int i = 0; i < simulation_config->drones_count; i++)
+                if ((drone_info_registry[i]->stat == DRONE_ON_HUB) && (drone_info_registry[i]->hub_id == self->id))
+                    drone_count_on_me++;
+            // int drone_count_on_me = self_config->charging_space_count - (charging_spaces_remaining[self->id-1] - drones_reserved_place_on_hub[self->id-1]);
+            DEBUG_LOG_SAFE(printf("Hub Thread %d: Drones on me: %d (CR: %d, DR: %d)\n", self->id, drone_count_on_me, charging_spaces_remaining[self->id-1], drones_reserved_place_on_hub[self->id-1]))
+            // UNLOCK_AND_CHECK(hub_charging_spaces_mutexes[self->id-1]);
 
             if (drone_count_on_me > 0) {
                 DynamicDroneInfo** drones_on_me = malloc(sizeof(DynamicDroneInfo*) * drone_count_on_me);
@@ -732,13 +737,13 @@ select_drones_loop:
                     exit(1);
                 }
 
-                LOCK_AND_CHECK(drone_info_mutex);
+                // LOCK_AND_CHECK(drone_info_mutex);
 
                 for (int i = 0, dom_index = 0; i < simulation_config->drones_count; i++)
                     if ((drone_info_registry[i]->stat == DRONE_ON_HUB) && drone_info_registry[i]->hub_id == self->id)
                         drones_on_me[dom_index++] = drone_info_registry[i];
 
-                UNLOCK_AND_CHECK(drone_info_mutex);
+                // UNLOCK_AND_CHECK(drone_info_mutex);
 
                 DynamicDroneInfo* drone_with_highest_range_on_me = NULL;
 
@@ -746,7 +751,7 @@ select_drones_loop:
                     if ((drone_with_highest_range_on_me == NULL) || (drones_on_me[i]->info->current_range > drone_with_highest_range_on_me->info->current_range))
                         drone_with_highest_range_on_me = drones_on_me[i];
 
-                LOCK_AND_CHECK(drone_info_mutex); 
+                // LOCK_AND_CHECK(drone_info_mutex); 
                 
                 if (drone_with_highest_range_on_me == NULL) {
                     UNLOCK_AND_CHECK(drone_info_mutex); 
@@ -765,13 +770,13 @@ select_drones_loop:
                 drone_with_highest_range_on_me->package_will_sent_index_in_outgoing = package_will_sent_index_in_outgoing;
                 drone_with_highest_range_on_me->info->packageInfo = package_will_sent;
                 drone_with_highest_range_on_me->info->next_hub_id = package_will_sent->receiving_hub_id;
-                charging_spaces_remaining[self->id-1]--;
                 UNLOCK_AND_CHECK(drone_info_mutex); 
 
                 DEBUG_LOG_SAFE(printf("Hub Thread %d: Assigned package to drone-%d!\n", self->id, drone_with_highest_range_on_me->info->id))
 
                 free(drones_on_me);
             } else {
+                // UNLOCK_AND_CHECK(drone_info_mutex);          
                 // CallDroneFromHubs ()
                 // if No drone is found in other hubs then
                 //     WaitTimeoutOrDrone ()
@@ -788,7 +793,7 @@ select_drones_loop:
                     UNLOCK_AND_CHECK(hub_charging_spaces_mutexes[other_hub_id-1]);
                     
                     if (drones_in_neighbor_hub > 0) {
-                        LOCK_AND_CHECK(drone_info_mutex); 
+                        // LOCK_AND_CHECK(drone_info_mutex); 
 
                         for (int i = 0; i < simulation_config->drones_count; i++)
                             if ((drone_info_registry[i]->stat == DRONE_ON_HUB) && drone_info_registry[i]->hub_id == other_hub_id) {
@@ -796,7 +801,7 @@ select_drones_loop:
                                 break;
                             }
 
-                        UNLOCK_AND_CHECK(drone_info_mutex); 
+                        // UNLOCK_AND_CHECK(drone_info_mutex); 
 
                         if (found_drone != NULL)
                             break;
@@ -807,14 +812,12 @@ select_drones_loop:
                 DEBUG_LOG_SAFE(printf("Hub Thread %d: Neighbor drone found: %p!\n", self->id, found_drone))
 
                 if (found_drone != NULL) {
-                    LOCK_AND_CHECK(drone_info_mutex); 
+                    // LOCK_AND_CHECK(drone_info_mutex); 
 
                     found_drone->stat = DRONE_ON_SELF_TRAVEL;
                     found_drone->info->next_hub_id = self->id;
                     found_drone->info->packageInfo = package_will_sent;
                     found_drone->package_will_sent_index_in_outgoing = package_will_sent_index_in_outgoing;
-
-                    charging_spaces_remaining[self->id-1]--;
 
                     // NOTE: Should we submit the package to the drone right now, or should we enter the loop again and when the drone comes then we should do it?
 
@@ -822,6 +825,7 @@ select_drones_loop:
 
                     DEBUG_LOG_SAFE(printf("Hub Thread %d: Assigned package to neighbor drone-%d!\n", self->id, found_drone->info->id))
                 } else {
+                    UNLOCK_AND_CHECK(drone_info_mutex); 
                     _wait(UNIT_TIME);
                     goto select_drones_loop;
                 }
