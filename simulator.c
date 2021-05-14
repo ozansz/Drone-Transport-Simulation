@@ -636,7 +636,7 @@ void* receiver_thread(void* _receiver_thread_config) {
 
                     // TODO: Do this
                     // BUT: Be careful for double-freeing
-                    // free(incoming_storages[self->current_hub_id-1][package_index])
+                    free(incoming_package);
 
                     // TODO: Change this to: wait()
                     _wait(self_config->wait_time_between_packages);
@@ -867,6 +867,8 @@ void* drone_thread(void* _drone_thread_config) {
     DEBUG_LOG_SAFE(printf("Drone Thread awake (id: %d, on hub: %d)\n", self->id, self->current_hub_id))
     LOG_SAFE(WriteOutput(NULL, NULL, self, NULL, DRONE_CREATED))
 
+    long long _last_charged_timestamp = timeInMilliseconds();
+
     int there_are_active_hubs;
 
     while (1) {
@@ -1005,15 +1007,39 @@ void* drone_thread(void* _drone_thread_config) {
                 LOG_SAFE(WriteOutput(NULL, NULL, self, NULL, DRONE_DEPOSITED))
                 UNLOCK_AND_CHECK(drone_info_mutex)
 
+                _last_charged_timestamp = timeInMilliseconds();
+
                 break;
             case DRONE_ON_SELF_TRAVEL:
                 // TODO::LAST
+
+
+                // When placed self to other hub, it's time to charge!!!
+                _last_charged_timestamp = timeInMilliseconds();
+
+                // When charge is enough, go fly!
+
                 break;
             case DRONE_ON_HUB:
                 // No package assigned, not on travel.
                 // Just wait to be assigned.
-                
-                // TODO: Charge self.
+
+                // Charge self.
+                LOCK_AND_CHECK(drone_info_mutex)
+
+                long long curr_time = timeInMilliseconds();
+
+                if (self->current_range == self_config->maximum_range) {
+                    UNLOCK_AND_CHECK(drone_info_mutex)
+                    // DEBUG_LOG_SAFE(printf("Drone Thread %d: DRONE_ON_HUB: Idle.\n", self->id))
+                } else {
+                    int old_charge = self->current_range;
+                    self->current_range = calculate_drone_charge(curr_time - _last_charged_timestamp, self->current_range, self_config->maximum_range);
+                    // DEBUG_LOG_SAFE(printf("Drone Thread %d: DRONE_ON_HUB: Charged by: %d -> %d (%d-%d)\n", self->id, old_charge, self->current_range, curr_time, _last_charged_timestamp))
+                    _last_charged_timestamp = curr_time;
+                    UNLOCK_AND_CHECK(drone_info_mutex)
+                }
+
                 break;
             default:
                 DEBUG_LOG_SAFE(printf("Drone Thread %d: drone_info_registry[%d]->stat = %d, UNEXPECTED!!! OUT OF BOUNDS!!!\n", self->id, self->id-1, drone_info_registry[self->id-1]->stat))
@@ -1060,9 +1086,6 @@ int main(int argc, char **argv, char **envp) {
 
     for (int i = 0; i < sim_config->drones_count; i++)
         charging_spaces_remaining[sim_config->drones[i].starting_hub_id-1]--;
-
-    // TODO: Initizlize first HubInfo, DroneInfo, SenderInfo, ReceiverInfo objects
-    //       Start threads
 
     int rv;
 
