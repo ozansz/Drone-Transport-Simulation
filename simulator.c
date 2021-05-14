@@ -9,7 +9,7 @@
 // - debug messages in receiver and drone threads.
 // test it!!!
 // new problems: - hubs select drones that max_charge << distance, so it never gets off from the hub, stuck in charging forever!
-//               - senders select ites own hub "randomly".
+//               - DONE##senders select ites own hub "randomly".
 
 #include "simulator.h"
 
