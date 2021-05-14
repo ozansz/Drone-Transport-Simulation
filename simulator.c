@@ -942,7 +942,7 @@ void* drone_thread(void* _drone_thread_config) {
                 
                 LOCK_AND_CHECK(drone_info_mutex)
                 FillPacketInfo(delivery_package, delivery_package->sender_id, delivery_package->sending_hub_id, delivery_package->receiver_id, delivery_package->receiving_hub_id);
-                FillDroneInfo(self, self->id, self->current_hub_id, self->current_range, delivery_package, 0);
+                FillDroneInfo(self, self->id, self->current_hub_id, self->current_range, delivery_package, delivery_hub_id);
                 // UNLOCK_AND_CHECK(drone_info_mutex)
                 LOG_SAFE(WriteOutput(NULL, NULL, self, NULL, DRONE_PICKUP))
 
@@ -1047,6 +1047,9 @@ void* drone_thread(void* _drone_thread_config) {
         }
     }
 
+    FillDroneInfo(self, self->id, self->current_hub_id, self->current_range, NULL, 0);
+    LOG_SAFE(WriteOutput(NULL, NULL, self, NULL, DRONE_STOPPED))
+
     DEBUG_LOG_SAFE(printf("Drone Thread %d: Exiting...\n", self->id))
 
     return NULL;
@@ -1098,6 +1101,8 @@ int main(int argc, char **argv, char **envp) {
     ReceiverThreadConfig receiver_confs[sim_config->hubs_count];
     HubThreadConfig hub_confs[sim_config->hubs_count];
     DroneThreadConfig drone_confs[sim_config->drones_count];
+
+    InitWriteOutput();
 
     for (int i = 0; i < sim_config->drones_count; i++) {
         drone_confs[i].self = (DroneInfo*) malloc(sizeof(DroneInfo));
