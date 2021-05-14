@@ -932,7 +932,8 @@ void* drone_thread(void* _drone_thread_config) {
                 DEBUG_LOG_SAFE(printf("Drone Thread %d: DRONE_ON_PACKAGE_TRANSFER: Current charge: %d\n", self->id, self->current_range))
 
                 // WaitForRange ()
-                while (self->current_range < distance_between_hubs) {
+                // while (self->current_range < distance_between_hubs) {
+                while (self->current_range < range_decrease(distance_between_hubs, self_config->travel_speed)) {
                     LOCK_AND_CHECK(drone_info_mutex)
                     self->current_range = calculate_drone_charge(timeInMilliseconds() - the_timestamp_on_start, self->current_range, self_config->maximum_range);
                     UNLOCK_AND_CHECK(drone_info_mutex)
@@ -992,7 +993,7 @@ void* drone_thread(void* _drone_thread_config) {
                 dyn_info->info->current_range = self->current_range;
                 dyn_info->package_will_sent_index_in_outgoing = -1;
                 dyn_info->stat = DRONE_ON_HUB;
-                DEBUG_LOG_SAFE(printf("Drone Thread %d: DRONE_ON_PACKAGE_TRANSFER: Updated dynamic info: new hub: %d\n", self->id, self->current_hub_id))
+                DEBUG_LOG_SAFE(printf("Drone Thread %d: DRONE_ON_PACKAGE_TRANSFER: Updated dynamic info: new hub: %d, charge: %d\n", self->id, self->current_hub_id, self->current_range))
                 UNLOCK_AND_CHECK(drone_info_mutex)
                 
                 // TODO:: LAST!
