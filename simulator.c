@@ -1,21 +1,9 @@
-// TODO:
-//       - editing "self" s may cause fuckups, as they are also regisered in critical data structures -shared arrays-
-//       - FillXXXInfo needs to be wrapped inside mutex lock/unlocks
-
-// i think the upper ones are done, i need to do:
-// -##DONE##- fix this: "unexpected: could not select drone: drone_with_highest_range_on_me: Success"
-// = complete drone code!
-// - segfault in somewhere sometimez xd
-// - debug messages in receiver and drone threads.
-// test it!!!
-// new problems: - hubs select drones that max_charge << distance, so it never gets off from the hub, stuck in charging forever!
-//               - DONE##senders select ites own hub "randomly".
-
 #include "simulator.h"
 
 SimulationConfig* sim_config = NULL;
 // const char* CONFIG_FILE_NAME = "test_config.txt";
-const char* CONFIG_FILE_NAME = "testinp2.txt";
+// const char* CONFIG_FILE_NAME = "testinp2.txt";
+const char* CONFIG_FILE_NAME = NULL;
 
 FILE* __debug_file;
 const char* DEBUG_LOG_FILE_NAME = "/dev/null";
@@ -650,7 +638,7 @@ void* sender_thread(void* _sender_thread_config) {
 
         // sleep()
         // TODO: Change this to: wait()
-        _wait(self_config->wait_time_between_packages * UNIT_TIME);
+        wait(self_config->wait_time_between_packages * UNIT_TIME);
         // sleep(2); // DEBUG: DELETE THIS!
     }
 
@@ -717,7 +705,7 @@ void* receiver_thread(void* _receiver_thread_config) {
                     free(incoming_package);
 
                     // TODO: Change this to: wait()
-                    _wait(self_config->wait_time_between_packages * UNIT_TIME);
+                    wait(self_config->wait_time_between_packages * UNIT_TIME);
                 }
 
         UNLOCK_AND_CHECK(hub_incoming_storage_mutexes[self->current_hub_id-1]);
@@ -911,7 +899,7 @@ select_drones_loop:
                     perror("    unexpected: could not select drone: drone_with_highest_range_on_me");
                     // exit(1);
                     free(drones_on_me);
-                    _wait(UNIT_TIME);
+                    wait(UNIT_TIME);
                     goto select_drones_loop;
                 }
 
@@ -1013,7 +1001,7 @@ select_drones_loop:
                     DEBUG_LOG_SAFE(fprintf(__debug_file, "Hub Thread %d: My new drone(%d) took the package.\n", self->id, found_drone->info->id))
                 } else {
                     UNLOCK_AND_CHECK(drone_info_mutex); 
-                    _wait(UNIT_TIME);
+                    wait(UNIT_TIME);
 
                     // TODO: EDIT HERE!
                     // WaitTimeoutOrDrone: Wait a specific duration until a drone arrives. The specific duration is 1 units of time. Time units will be explained later.

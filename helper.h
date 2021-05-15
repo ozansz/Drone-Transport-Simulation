@@ -14,7 +14,7 @@ void travel(int distance, int speed);
 // Returns the final range based on the calculation
 int calculate_drone_charge(long long ms, int current_range, int max_range);
 // Sleep for given milliseconds
-void _wait(long long ms);
+void wait(long long ms);
 // Gets the current time since epoch in milliseconds
 long long timeInMilliseconds(void);
 
