@@ -8,6 +8,8 @@ const char* CONFIG_FILE_NAME = NULL;
 FILE* __debug_file;
 const char* DEBUG_LOG_FILE_NAME = "/dev/null";
 
+int ___defer = 1;
+
 pthread_t* hub_pthreads = NULL;
 pthread_t* drone_pthreads = NULL;
 pthread_t* sender_pthreads = NULL;
@@ -97,205 +99,207 @@ long long ___last_unlock_ts = -1;
 #define FREE_AND_NULL(x) {free(x); x = NULL;}
 
 void defer(void) {
-    if (DEBUG_SIMULATOR)
-        fprintf(__debug_file, "\n[*] Called defer()\n");
-
-    if (incoming_storages != NULL) {
+    if (___defer) {
         if (DEBUG_SIMULATOR)
-            fprintf(__debug_file, " ++ Freeing incoming_storages\n");
+            fprintf(__debug_file, "\n[*] Called defer()\n");
 
-        if ((sim_config != NULL) && (sim_config->hubs != NULL)) {
-            for (int i = 0; i < sim_config->hubs_count; i++) {
-                if (incoming_storages[i] != NULL) {
-                    if (DEBUG_SIMULATOR)
-                        fprintf(__debug_file, "    ++ incoming_storages[%d]\n", i);
+        if (incoming_storages != NULL) {
+            if (DEBUG_SIMULATOR)
+                fprintf(__debug_file, " ++ Freeing incoming_storages\n");
 
-                    for (int j = 0; j < sim_config->hubs[i].incoming_storge_size; j++)
-                        if (incoming_storages[i][j] != NULL)
-                            free(incoming_storages[i][j]);
+            if ((sim_config != NULL) && (sim_config->hubs != NULL)) {
+                for (int i = 0; i < sim_config->hubs_count; i++) {
+                    if (incoming_storages[i] != NULL) {
+                        if (DEBUG_SIMULATOR)
+                            fprintf(__debug_file, "    ++ incoming_storages[%d]\n", i);
 
-                    free(incoming_storages[i]);
+                        for (int j = 0; j < sim_config->hubs[i].incoming_storge_size; j++)
+                            if (incoming_storages[i][j] != NULL)
+                                free(incoming_storages[i][j]);
+
+                        free(incoming_storages[i]);
+                    }
                 }
+            } else {
+                fprintf(__debug_file, "   >!! sim_config is NULL, just freeing incoming_storages.\n");
+                fprintf(__debug_file, "   >!! There may be data loss in heap.\n");
             }
-        } else {
-            fprintf(__debug_file, "   >!! sim_config is NULL, just freeing incoming_storages.\n");
-            fprintf(__debug_file, "   >!! There may be data loss in heap.\n");
+
+            free(incoming_storages);
         }
 
-        free(incoming_storages);
-    }
+        if (outgoing_storages != NULL) {
+            if (DEBUG_SIMULATOR)
+                fprintf(__debug_file, " ++ Freeing outgoing_storages\n");
 
-    if (outgoing_storages != NULL) {
-        if (DEBUG_SIMULATOR)
-            fprintf(__debug_file, " ++ Freeing outgoing_storages\n");
+            if ((sim_config != NULL) && (sim_config->hubs != NULL)) {
+                for (int i = 0; i < sim_config->hubs_count; i++) {
+                    if (outgoing_storages[i] != NULL) {
+                        if (DEBUG_SIMULATOR)
+                            fprintf(__debug_file, "    ++ outgoing_storages[%d]\n", i);
 
-        if ((sim_config != NULL) && (sim_config->hubs != NULL)) {
-            for (int i = 0; i < sim_config->hubs_count; i++) {
-                if (outgoing_storages[i] != NULL) {
-                    if (DEBUG_SIMULATOR)
-                        fprintf(__debug_file, "    ++ outgoing_storages[%d]\n", i);
+                        for (int j = 0; j < sim_config->hubs[i].outgoing_storge_size; j++)
+                            if (outgoing_storages[i][j] != NULL)
+                                free(outgoing_storages[i][j]);
 
-                    for (int j = 0; j < sim_config->hubs[i].outgoing_storge_size; j++)
-                        if (outgoing_storages[i][j] != NULL)
-                            free(outgoing_storages[i][j]);
-
-                    free(outgoing_storages[i]);
+                        free(outgoing_storages[i]);
+                    }
                 }
+            } else {
+                fprintf(__debug_file, "   >!! sim_config is NULL, just freeing outgoing_storages.\n");
+                fprintf(__debug_file, "   >!! There may be data loss in heap.\n");
             }
-        } else {
-            fprintf(__debug_file, "   >!! sim_config is NULL, just freeing outgoing_storages.\n");
-            fprintf(__debug_file, "   >!! There may be data loss in heap.\n");
+
+            free(outgoing_storages);
         }
 
-        free(outgoing_storages);
-    }
+        if (drone_info_registry != NULL) {
+            if (DEBUG_SIMULATOR)
+                fprintf(__debug_file, " ++ Freeing drone_info_registry\n");
 
-    if (drone_info_registry != NULL) {
-        if (DEBUG_SIMULATOR)
-            fprintf(__debug_file, " ++ Freeing drone_info_registry\n");
+            if ((sim_config != NULL) && (sim_config->drones != NULL)) {
+                for (int i = 0; i < sim_config->drones_count; i++) {
+                    if (drone_info_registry[i] != NULL) {
+                        if (DEBUG_SIMULATOR)
+                            fprintf(__debug_file, "    ++ drone_info_registry[%d]\n", i);
 
-        if ((sim_config != NULL) && (sim_config->drones != NULL)) {
-            for (int i = 0; i < sim_config->drones_count; i++) {
-                if (drone_info_registry[i] != NULL) {
-                    if (DEBUG_SIMULATOR)
-                        fprintf(__debug_file, "    ++ drone_info_registry[%d]\n", i);
+                        if (drone_info_registry[i]->info != NULL)
+                            free(drone_info_registry[i]->info);
 
-                    if (drone_info_registry[i]->info != NULL)
-                        free(drone_info_registry[i]->info);
-
-                    free(drone_info_registry[i]);
+                        free(drone_info_registry[i]);
+                    }
                 }
-            }
-        } else {
-            fprintf(__debug_file, "   >!! sim_config is NULL, just freeing drone_info_registry.\n");
-            fprintf(__debug_file, "   >!! There may be data loss in heap.\n");
-        }
-
-        free(drone_info_registry);
-    }
-
-    if (sim_config != NULL) {
-        if (DEBUG_SIMULATOR)
-            fprintf(__debug_file, " ++ Freeing sim_config\n");
-
-        if (sim_config->drones != NULL)
-            free(sim_config->drones);
-
-        if (sim_config->hubs != NULL) {
-            for (int i = 0; i < sim_config->hubs_count; i++) {
-                if (sim_config->hubs[i].distance_to_other_hubs != NULL)
-                    free(sim_config->hubs[i].distance_to_other_hubs);
-
-                if (sim_config->hubs[i].nearest_other_hubs_sorted != NULL)
-                    free(sim_config->hubs[i].nearest_other_hubs_sorted);
+            } else {
+                fprintf(__debug_file, "   >!! sim_config is NULL, just freeing drone_info_registry.\n");
+                fprintf(__debug_file, "   >!! There may be data loss in heap.\n");
             }
 
-            free(sim_config->hubs);
+            free(drone_info_registry);
         }
 
-        free(sim_config);
-    }
+        if (sim_config != NULL) {
+            if (DEBUG_SIMULATOR)
+                fprintf(__debug_file, " ++ Freeing sim_config\n");
 
-    if (hub_pthreads != NULL) {
-        if (DEBUG_SIMULATOR)
-            fprintf(__debug_file, " ++ Freeing hub_pthreads\n");
+            if (sim_config->drones != NULL)
+                free(sim_config->drones);
+
+            if (sim_config->hubs != NULL) {
+                for (int i = 0; i < sim_config->hubs_count; i++) {
+                    if (sim_config->hubs[i].distance_to_other_hubs != NULL)
+                        free(sim_config->hubs[i].distance_to_other_hubs);
+
+                    if (sim_config->hubs[i].nearest_other_hubs_sorted != NULL)
+                        free(sim_config->hubs[i].nearest_other_hubs_sorted);
+                }
+
+                free(sim_config->hubs);
+            }
+
+            free(sim_config);
+        }
+
+        if (hub_pthreads != NULL) {
+            if (DEBUG_SIMULATOR)
+                fprintf(__debug_file, " ++ Freeing hub_pthreads\n");
+            
+            free(hub_pthreads);
+        }
+
+        if (drone_pthreads != NULL) {
+            if (DEBUG_SIMULATOR)
+                fprintf(__debug_file, " ++ Freeing drone_pthreads\n");
+            
+            free(drone_pthreads);
+        }
+
+        if (sender_pthreads != NULL) {
+            if (DEBUG_SIMULATOR)
+                fprintf(__debug_file, " ++ Freeing sender_pthreads\n");
+
+            free(sender_pthreads);
+        }
+
+        if (receiver_pthreads != NULL) {
+            if (DEBUG_SIMULATOR)
+                fprintf(__debug_file, " ++ Freeing receiver_pthreads\n");
+
+            free(receiver_pthreads);
+        }
+
+        if (hub_incoming_storage_mutexes != NULL) {
+            if (DEBUG_SIMULATOR)
+                fprintf(__debug_file, " ++ Freeing hub_incoming_storage_mutexes\n");
+
+            free(hub_incoming_storage_mutexes);
+        }
+
+        if (hub_outgoing_storage_mutexes != NULL) {
+            if (DEBUG_SIMULATOR)
+                fprintf(__debug_file, " ++ Freeing hub_outgoing_storage_mutexes\n");
+
+            free(hub_outgoing_storage_mutexes);
+        }
+
+        if (hub_charging_spaces_mutexes != NULL) {
+            if (DEBUG_SIMULATOR)
+                fprintf(__debug_file, " ++ Freeing hub_charging_spaces_mutexes\n");
+
+            free(hub_charging_spaces_mutexes);
+        }
+
+        if (incoming_storage_remaining != NULL) {
+            if (DEBUG_SIMULATOR)
+                fprintf(__debug_file, " ++ Freeing incoming_storage_remaining\n");
+
+            free(incoming_storage_remaining);
+        }
+
+        if (outgoing_storage_remaining != NULL) {
+            if (DEBUG_SIMULATOR)
+                fprintf(__debug_file, " ++ Freeing outgoing_storage_remaining\n");
+
+            free(outgoing_storage_remaining);
+        }
+
+        if (outgoing_waiting_for_drone_pickup != NULL) {
+            if (DEBUG_SIMULATOR)
+                fprintf(__debug_file, " ++ Freeing outgoing_waiting_for_drone_pickup\n");
+
+            free(outgoing_waiting_for_drone_pickup);
+        }
+
+        if (charging_spaces_remaining != NULL) {
+            if (DEBUG_SIMULATOR)
+                fprintf(__debug_file, " ++ Freeing charging_spaces_remaining\n");
+
+            free(charging_spaces_remaining);
+        }
+
+        if (drones_reserved_place_on_hub != NULL) {
+            if (DEBUG_SIMULATOR)
+                fprintf(__debug_file, " ++ Freeing drones_reserved_place_on_hub\n");
+
+            free(drones_reserved_place_on_hub);
+        }
         
-        free(hub_pthreads);
-    }
+        if (hub_activity_registry != NULL) {
+            if (DEBUG_SIMULATOR)
+                fprintf(__debug_file, " ++ Freeing hub_activity_registry\n");
 
-    if (drone_pthreads != NULL) {
+            free(hub_activity_registry);
+        }
+
+        if (sender_activity_registry != NULL) {
+            if (DEBUG_SIMULATOR)
+                fprintf(__debug_file, " ++ Freeing sender_activity_registry\n");
+
+            free(sender_activity_registry);
+        }
+
         if (DEBUG_SIMULATOR)
-            fprintf(__debug_file, " ++ Freeing drone_pthreads\n");
-        
-        free(drone_pthreads);
+            fprintf(__debug_file, "[*] defer(): Cleanup OK!\n");
     }
-
-    if (sender_pthreads != NULL) {
-        if (DEBUG_SIMULATOR)
-            fprintf(__debug_file, " ++ Freeing sender_pthreads\n");
-
-        free(sender_pthreads);
-    }
-
-    if (receiver_pthreads != NULL) {
-        if (DEBUG_SIMULATOR)
-            fprintf(__debug_file, " ++ Freeing receiver_pthreads\n");
-
-        free(receiver_pthreads);
-    }
-
-    if (hub_incoming_storage_mutexes != NULL) {
-        if (DEBUG_SIMULATOR)
-            fprintf(__debug_file, " ++ Freeing hub_incoming_storage_mutexes\n");
-
-        free(hub_incoming_storage_mutexes);
-    }
-
-    if (hub_outgoing_storage_mutexes != NULL) {
-        if (DEBUG_SIMULATOR)
-            fprintf(__debug_file, " ++ Freeing hub_outgoing_storage_mutexes\n");
-
-        free(hub_outgoing_storage_mutexes);
-    }
-
-    if (hub_charging_spaces_mutexes != NULL) {
-        if (DEBUG_SIMULATOR)
-            fprintf(__debug_file, " ++ Freeing hub_charging_spaces_mutexes\n");
-
-        free(hub_charging_spaces_mutexes);
-    }
-
-    if (incoming_storage_remaining != NULL) {
-        if (DEBUG_SIMULATOR)
-            fprintf(__debug_file, " ++ Freeing incoming_storage_remaining\n");
-
-        free(incoming_storage_remaining);
-    }
-
-    if (outgoing_storage_remaining != NULL) {
-        if (DEBUG_SIMULATOR)
-            fprintf(__debug_file, " ++ Freeing outgoing_storage_remaining\n");
-
-        free(outgoing_storage_remaining);
-    }
-
-    if (outgoing_waiting_for_drone_pickup != NULL) {
-        if (DEBUG_SIMULATOR)
-            fprintf(__debug_file, " ++ Freeing outgoing_waiting_for_drone_pickup\n");
-
-        free(outgoing_waiting_for_drone_pickup);
-    }
-
-    if (charging_spaces_remaining != NULL) {
-        if (DEBUG_SIMULATOR)
-            fprintf(__debug_file, " ++ Freeing charging_spaces_remaining\n");
-
-        free(charging_spaces_remaining);
-    }
-
-    if (drones_reserved_place_on_hub != NULL) {
-        if (DEBUG_SIMULATOR)
-            fprintf(__debug_file, " ++ Freeing drones_reserved_place_on_hub\n");
-
-        free(drones_reserved_place_on_hub);
-    }
-    
-    if (hub_activity_registry != NULL) {
-        if (DEBUG_SIMULATOR)
-            fprintf(__debug_file, " ++ Freeing hub_activity_registry\n");
-
-        free(hub_activity_registry);
-    }
-
-    if (sender_activity_registry != NULL) {
-        if (DEBUG_SIMULATOR)
-            fprintf(__debug_file, " ++ Freeing sender_activity_registry\n");
-
-        free(sender_activity_registry);
-    }
-
-    if (DEBUG_SIMULATOR)
-        fprintf(__debug_file, "[*] defer(): Cleanup OK!\n");
 }
 
 void init_mutexes(int hub_count) {
@@ -1400,8 +1404,20 @@ void* debugger_thread(void* __v) {
     }
 }
 
+void __memsafe(int __sn) {
+    ___defer = 0;
+    exit(0);
+}
+
+void __failsafe(int __sn) {
+    exit(0);
+}
+
 int main(int argc, char **argv, char **envp) {
     atexit(defer);
+    // signal(SIGALRM, __failsafe);
+    signal(SIGSEGV, __memsafe);
+    // alarm(120);
 
     __debug_file = fopen(DEBUG_LOG_FILE_NAME, "w");
 
