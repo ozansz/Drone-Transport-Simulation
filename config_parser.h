@@ -43,6 +43,6 @@ typedef struct {
 } SimulationConfig;
 
 SimulationConfig* parse_config_from_file(FILE* fp);
-void dump_config(SimulationConfig* conf);
+void dump_config(FILE* fp, SimulationConfig* conf);
 
 #endif

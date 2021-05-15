@@ -108,41 +108,41 @@ SimulationConfig* parse_config_from_file(FILE* fp) {
     return config;
 }
 
-void dump_config(SimulationConfig* config) {
+void dump_config(FILE* fp, SimulationConfig* config) {
     if (config == NULL) {
         perror("dump_config/config is NULL");
         return;
     }
 
     for (int i = 0; i < config->hubs_count; i++) {
-        printf("Hub-%d:\n", config->hubs[i].hub_id);
-        printf("    I: %d\n", config->hubs[i].incoming_storge_size);
-        printf("    O: %d\n", config->hubs[i].outgoing_storge_size);
-        printf("    C: %d\n", config->hubs[i].charging_space_count);
+        fprintf(fp, "Hub-%d:\n", config->hubs[i].hub_id);
+        fprintf(fp, "    I: %d\n", config->hubs[i].incoming_storge_size);
+        fprintf(fp, "    O: %d\n", config->hubs[i].outgoing_storge_size);
+        fprintf(fp, "    C: %d\n", config->hubs[i].charging_space_count);
 
-        printf("    D: ");
+        fprintf(fp, "    D: ");
 
         for (int j = 0; j < config->hubs_count; j++)
-            printf("%d ", config->hubs[i].distance_to_other_hubs[j]);
+            fprintf(fp, "%d ", config->hubs[i].distance_to_other_hubs[j]);
 
-        printf("\n    Nearest: ");
+        fprintf(fp, "\n    Nearest: ");
 
         for (int j = 0; j < config->hubs_count - 1; j++)
-            printf("%d ", config->hubs[i].nearest_other_hubs_sorted[j]);
+            fprintf(fp, "%d ", config->hubs[i].nearest_other_hubs_sorted[j]);
 
-        printf("\n    S: Sender-%d\n", config->hubs[i].sender.sender_id);
-        printf("        S: %d\n", config->hubs[i].sender.wait_time_between_packages);
-        printf("        H: %d\n", config->hubs[i].sender.hub_id);
-        printf("        T: %d\n", config->hubs[i].sender.total_packages);
-        printf("    R: Receiver-%d\n", config->hubs[i].receiver.receiver_id);
-        printf("        S: %d\n", config->hubs[i].receiver.wait_time_between_packages);
-        printf("        H: %d\n\n", config->hubs[i].receiver.hub_id);
+        fprintf(fp, "\n    S: Sender-%d\n", config->hubs[i].sender.sender_id);
+        fprintf(fp, "        S: %d\n", config->hubs[i].sender.wait_time_between_packages);
+        fprintf(fp, "        H: %d\n", config->hubs[i].sender.hub_id);
+        fprintf(fp, "        T: %d\n", config->hubs[i].sender.total_packages);
+        fprintf(fp, "    R: Receiver-%d\n", config->hubs[i].receiver.receiver_id);
+        fprintf(fp, "        S: %d\n", config->hubs[i].receiver.wait_time_between_packages);
+        fprintf(fp, "        H: %d\n\n", config->hubs[i].receiver.hub_id);
     }
 
     for (int i = 0; i < config->drones_count; i++) {
-        printf("Drone-%d:\n", config->drones[i].drone_id);
-        printf("    S: %d\n", config->drones[i].travel_speed);
-        printf("    H: %d\n", config->drones[i].starting_hub_id);
-        printf("    R: %d\n\n", config->drones[i].maximum_range);
+        fprintf(fp, "Drone-%d:\n", config->drones[i].drone_id);
+        fprintf(fp, "    S: %d\n", config->drones[i].travel_speed);
+        fprintf(fp, "    H: %d\n", config->drones[i].starting_hub_id);
+        fprintf(fp, "    R: %d\n\n", config->drones[i].maximum_range);
     }
 }

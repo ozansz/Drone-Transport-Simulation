@@ -11,7 +11,7 @@
 #include "writeOutput.h"
 #include "helper.h"
 
-#define DEBUG_SIMULATOR 0
+#define DEBUG_SIMULATOR 1
 
 typedef struct {
     SenderInfo* self;
