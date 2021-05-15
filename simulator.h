@@ -12,6 +12,7 @@
 #include "helper.h"
 
 #define DEBUG_SIMULATOR 1
+#define SUPERLOGGING 0
 
 typedef struct {
     SenderInfo* self;
